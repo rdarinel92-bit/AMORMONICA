@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#ffffff">
+  <title>Chat Privado Ligero</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <h1>Chat Privado Ligero</h1>
+        <p class="subtitle">Una sola pagina, optimizada para conexiones lentas</p>
+      </div>
+      <button id="toggle-setup" type="button" class="button ghost">Config</button>
+    </header>
+
+    <section class="status-grid" aria-label="Estado de conexion">
+      <div class="status-card">
+        <span class="label">Modo</span>
+        <strong id="connection-mode">Sin configurar</strong>
+      </div>
+      <div class="status-card">
+        <span class="label">Velocidad</span>
+        <strong id="connection-speed">-</strong>
+      </div>
+      <div class="status-card">
+        <span class="label">Latencia</span>
+        <strong id="connection-latency">-</strong>
+      </div>
+      <div class="status-card">
+        <span class="label">Estabilidad</span>
+        <strong id="connection-stability">-</strong>
+      </div>
+      <div class="status-card">
+        <span class="label">Perdida</span>
+        <strong id="connection-loss">-</strong>
+      </div>
+      <div class="status-card">
+        <span class="label">Cola</span>
+        <strong id="queue-size">0</strong>
+      </div>
+    </section>
+
+    <section id="setup-panel" class="setup-panel" hidden>
+      <h2>Configuracion Supabase</h2>
+      <p class="setup-note">Usa la clave anon publica. No pongas service role en el navegador.</p>
+      <form id="config-form" class="config-form">
+        <label>
+          URL de Supabase
+          <input id="supabase-url" name="supabaseUrl" type="url" placeholder="https://tu-proyecto.supabase.co" autocomplete="off">
+        </label>
+        <label>
+          Clave anon
+          <textarea id="supabase-key" name="supabaseKey" rows="3" placeholder="eyJ..."></textarea>
+        </label>
+        <label>
+          Sala o session_id
+          <input id="session-id" name="sessionId" type="text" placeholder="sala-principal" autocomplete="off">
+        </label>
+        <label>
+          Remitente o sender
+          <input id="sender-id" name="senderId" type="text" placeholder="roberto" autocomplete="off">
+        </label>
+        <label>
+          Bucket
+          <input id="bucket-name" name="bucketName" type="text" value="chat-files" autocomplete="off">
+        </label>
+        <label>
+          Funcion exportHistory
+          <input id="export-endpoint" name="exportEndpoint" type="text" value="exportHistory" autocomplete="off">
+        </label>
+        <label>
+          Correo destino para exportar
+          <input id="export-email" name="exportEmail" type="email" placeholder="correo@ejemplo.com" autocomplete="off">
+        </label>
+        <div class="setup-actions">
+          <button class="button" type="submit">Guardar</button>
+          <button id="reload-history" class="button ghost" type="button">Recargar historial</button>
+          <button id="export-history" class="button ghost" type="button">Exportar historial</button>
+          <button id="download-transcript" class="button ghost" type="button">Descargar TXT</button>
+        </div>
+      </form>
+
+      <details>
+        <summary>Requisitos de Supabase</summary>
+        <pre id="setup-requirements"></pre>
+      </details>
+    </section>
+
+    <section id="chat-log" class="chat-log" aria-live="polite" aria-label="Mensajes"></section>
+
+    <section class="composer">
+      <form id="message-form" class="composer-form">
+        <textarea id="message-input" rows="2" maxlength="2000" placeholder="Escribe un mensaje"></textarea>
+        <div class="composer-actions">
+          <label class="button ghost file-button" for="image-input">Imagen</label>
+          <button id="send-button" class="button" type="submit">Enviar</button>
+        </div>
+      </form>
+      <input id="image-input" type="file" accept="image/*" hidden>
+      <p id="composer-hint" class="hint">Sin audio por defecto. El modo de conexion ajusta la compresion automaticamente.</p>
+    </section>
+  </main>
+
+  <template id="message-template">
+    <article class="message">
+      <header class="message-meta">
+        <strong class="message-sender"></strong>
+        <span class="message-time"></span>
+        <span class="message-state"></span>
+      </header>
+      <div class="message-body"></div>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
