@@ -14,9 +14,9 @@
 <body>
   <main class="app">
     <header class="topbar">
-      <div>
-        <h1>Chat Privado Ligero</h1>
-        <p class="subtitle">Una sola pagina, optimizada para conexiones lentas. Usuario: <strong id="active-user">cargando...</strong></p>
+      <div class="user-pill" aria-live="polite" aria-label="Usuario activo">
+        <span class="user-pill-label">Usuario</span>
+        <strong id="active-user">cargando...</strong>
       </div>
       <div class="topbar-actions">
         <button id="install-app" type="button" class="button ghost" hidden aria-hidden="true">Instalar</button>

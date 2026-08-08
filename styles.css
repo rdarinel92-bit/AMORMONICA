@@ -87,14 +87,38 @@ button {
 
 .topbar {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 10px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 8px 10px;
   background: var(--card);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+}
+
+.user-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.92rem;
+  max-width: min(70vw, 420px);
+}
+
+.user-pill strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-pill-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .topbar-actions {
@@ -426,7 +450,11 @@ pre {
   }
 
   .topbar {
-    flex-direction: column;
+    gap: 10px;
+  }
+
+  .user-pill {
+    max-width: 100%;
   }
 
   .message {
