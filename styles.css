@@ -128,6 +128,60 @@ button {
   justify-content: flex-end;
 }
 
+.profile-floating {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-avatar {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 2px solid var(--line);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.profile-avatar:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(76, 194, 255, 0.3);
+}
+
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-camera-icon {
+  position: absolute;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  background: rgba(14, 17, 22, 0.85);
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-avatar:hover .profile-camera-icon {
+  opacity: 1;
+}
+
 .topbar h1 {
   margin: 0;
   font-size: 1.3rem;
@@ -485,6 +539,20 @@ pre {
 
   .composer-fixed {
     bottom: 8px;
+  }
+
+  .profile-floating {
+    top: 10px;
+    right: 10px;
+  }
+
+  .profile-avatar {
+    width: 36px;
+    height: 36px;
+  }
+
+  .profile-camera-icon {
+    font-size: 12px;
   }
 }
 

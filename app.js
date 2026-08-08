@@ -7,7 +7,8 @@ const STORAGE_KEYS = {
   identity: 'chat-lite-identity',
   autoSavedImages: 'chat-lite-auto-saved-images',
   forceImages: 'chat-lite-force-images',
-  e2eeUnlockUntil: 'chat-lite-e2ee-unlock-until'
+  e2eeUnlockUntil: 'chat-lite-e2ee-unlock-until',
+  profilePhoto: 'chat-lite-profile-photo'
 };
 
 const DB_NAME = 'chat-lite-db';
@@ -131,7 +132,9 @@ const elements = {
   draftEstimate: document.getElementById('draft-estimate'),
   draftSendButton: document.getElementById('draft-send'),
   draftChangeButton: document.getElementById('draft-change'),
-  draftDiscardButton: document.getElementById('draft-discard')
+  draftDiscardButton: document.getElementById('draft-discard'),
+  profilePhotoInput: document.getElementById('profile-photo-input'),
+  profileAvatarImg: document.getElementById('profile-avatar-img')
 };
 
 boot().catch((error) => {
@@ -141,6 +144,7 @@ boot().catch((error) => {
 
 async function boot() {
   bindUi();
+  loadProfilePhoto();
   registerPwa();
   applyConfigToForm();
   setComposerLocked(true);
@@ -352,6 +356,15 @@ function bindUi() {
 
   elements.draftDiscardButton.addEventListener('click', () => {
     closImageDraftPanel();
+  });
+
+  elements.profilePhotoInput.addEventListener('change', async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+    await saveProfilePhoto(file);
   });
 
   elements.exportHistory.addEventListener('click', async () => {
@@ -585,6 +598,33 @@ function persistQueuedTexts() {
 
 function persistKnownRemoteIds() {
   saveJson(STORAGE_KEYS.knownRemoteIds, Array.from(state.knownRemoteIds));
+}
+
+async function saveProfilePhoto(file) {
+  try {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target.result;
+      localStorage.setItem(STORAGE_KEYS.profilePhoto, dataUrl);
+      elements.profileAvatarImg.src = dataUrl;
+      elements.profileAvatarImg.style.opacity = '1';
+    };
+    reader.readAsDataURL(file);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function loadProfilePhoto() {
+  try {
+    const photoDataUrl = localStorage.getItem(STORAGE_KEYS.profilePhoto);
+    if (photoDataUrl) {
+      elements.profileAvatarImg.src = photoDataUrl;
+      elements.profileAvatarImg.style.opacity = '1';
+    }
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function persistAutoSavedImages() {
