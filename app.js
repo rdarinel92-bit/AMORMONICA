@@ -18,7 +18,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v39';
+const APP_VERSION = '2026-08-08-v40';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -36,6 +36,10 @@ const VOICE_MIN_BYTES = 400;
 const VOICE_BITRATE_KBPS_LOW = 16;
 const VOICE_BITRATE_KBPS_MEDIUM = 24;
 const VOICE_BITRATE_KBPS_HIGH = 32;
+const BOOT_PROBE_TIMEOUT_MS = 8000;
+const BOOT_HISTORY_TIMEOUT_MS = 12000;
+const HISTORY_FETCH_TIMEOUT_MS = 10000;
+const PROBE_FETCH_TIMEOUT_MS = 7000;
 const RESET_FUNCTION_TIMEOUT_MS = 25000;
 const HISTORY_PAGE_SIZE = 80;
 const IDENTITY_ENTRY_STEPS = [
@@ -283,31 +287,58 @@ async function boot() {
   registerPwa();
   applyConfigToForm();
   setComposerLocked(true);
-  await ensureIdentitySelected();
-  updateIdentityEntryLoadingStatus('Preparando cifrado de mensajes...', 36);
-  await ensureE2EEUnlocked(true);
-  updateIdentityEntryLoadingStatus('Cargando datos locales...', 52);
-  elements.setupRequirements.textContent = buildSetupRequirements();
-  renderMessages();
-  updateQueueSize();
-  updateConnectionUi();
-  state.db = await openDb();
-  state.initialized = true;
-  await restoreUploadJobs();
-  updateIdentityEntryLoadingStatus('Midiendo conexión...', 68);
-  startConnectionMonitoring();
-  await probeConnection();
-  if (isConfigured()) {
-    updateIdentityEntryLoadingStatus('Sincronizando historial...', 84);
-    await refreshHistory();
-    connectRealtime();
-    flushQueues();
-    updateIdentityEntryLoadingStatus('Historial listo. Entrando...', 100);
-  } else {
-    updateIdentityEntryLoadingStatus('Configuración lista. Entrando...', 100);
+
+  try {
+    await ensureIdentitySelected();
+    updateIdentityEntryLoadingStatus('Preparando cifrado de mensajes...', 36);
+    await ensureE2EEUnlocked(true);
+    updateIdentityEntryLoadingStatus('Cargando datos locales...', 52);
+    elements.setupRequirements.textContent = buildSetupRequirements();
+    renderMessages();
+    updateQueueSize();
+    updateConnectionUi();
+    state.db = await openDb();
+    state.initialized = true;
+    await restoreUploadJobs();
+    updateIdentityEntryLoadingStatus('Midiendo conexión...', 68);
+    startConnectionMonitoring();
+
+    await runWithTimeout(() => probeConnection(), BOOT_PROBE_TIMEOUT_MS, 'probeConnection');
+
+    if (isConfigured()) {
+      updateIdentityEntryLoadingStatus('Sincronizando historial...', 84);
+      await runWithTimeout(() => refreshHistory({ silent: true }), BOOT_HISTORY_TIMEOUT_MS, 'refreshHistory');
+      connectRealtime();
+      flushQueues();
+      updateIdentityEntryLoadingStatus('Historial listo. Entrando...', 100);
+    } else {
+      updateIdentityEntryLoadingStatus('Configuración lista. Entrando...', 100);
+    }
+  } catch (error) {
+    console.error(error);
+    setComposerHint('Entrando con datos locales. Seguiremos sincronizando en segundo plano.');
+  } finally {
+    finalizeIdentityEntry();
+    setComposerLocked(false);
   }
-  finalizeIdentityEntry();
-  setComposerLocked(false);
+}
+
+async function runWithTimeout(taskFactory, timeoutMs, label) {
+  let timeoutId = null;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => taskFactory()),
+      new Promise((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          reject(new Error(`Timeout en ${label}`));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+  }
 }
 
 function scheduleKeyboardViewportUpdate() {
@@ -3477,9 +3508,22 @@ async function fetchMessagesRemote(options = {}) {
     parts.push('order=timestamp.asc');
   }
   const url = `${state.config.supabaseUrl}/rest/v1/messages?${parts.join('&')}`;
-  const response = await fetch(url, {
-    headers: supabaseHeaders()
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), HISTORY_FETCH_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: supabaseHeaders(),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      throw new Error('Timeout al leer mensajes de Supabase');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
   if (!response.ok) {
     throw new Error('Fallo al leer mensajes');
   }
@@ -4285,10 +4329,14 @@ async function probeConnection() {
   if (navigator.onLine && isConfigured()) {
     const started = performance.now();
     try {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), PROBE_FETCH_TIMEOUT_MS);
       const response = await fetch(`${state.config.supabaseUrl}/rest/v1/messages?select=id&limit=1`, {
         headers: supabaseHeaders(),
-        cache: 'no-store'
+        cache: 'no-store',
+        signal: controller.signal
       });
+      window.clearTimeout(timeoutId);
       const text = await response.text();
       const elapsed = Math.max(1, performance.now() - started);
       sample.ok = response.ok;
