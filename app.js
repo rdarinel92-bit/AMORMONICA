@@ -4,7 +4,8 @@ const STORAGE_KEYS = {
   localMessages: 'chat-lite-local-messages',
   knownRemoteIds: 'chat-lite-known-remote-ids',
   configLocked: 'chat-lite-config-locked',
-  identity: 'chat-lite-identity'
+  identity: 'chat-lite-identity',
+  autoSavedImages: 'chat-lite-auto-saved-images'
 };
 
 const DB_NAME = 'chat-lite-db';
@@ -58,6 +59,7 @@ const state = {
   heartbeatTimer: null,
   resumeTimer: null,
   imageRetryTimers: new Map(),
+  autoSavedImages: new Set(loadJson(STORAGE_KEYS.autoSavedImages, [])),
   e2eeKeyPromise: null,
   e2eeKeyFingerprint: '',
   lastSyncAt: null,
@@ -457,6 +459,10 @@ function persistKnownRemoteIds() {
   saveJson(STORAGE_KEYS.knownRemoteIds, Array.from(state.knownRemoteIds));
 }
 
+function persistAutoSavedImages() {
+  saveJson(STORAGE_KEYS.autoSavedImages, Array.from(state.autoSavedImages));
+}
+
 function messageKey(message) {
   return message.local_id || message.id;
 }
@@ -574,6 +580,10 @@ async function renderImageMessage(message, container, loadingNode) {
     frame.appendChild(actions);
 
     loadingNode.replaceWith(frame);
+
+    if (!isOwnMessage(message)) {
+      autoSaveReceivedImage(message, src).catch((error) => console.error(error));
+    }
   } catch (error) {
     loadingNode.textContent = 'Imagen atrasada. Reintentando...';
     scheduleImageRetry(message);
@@ -598,6 +608,23 @@ async function downloadImageAsset(message, src) {
     console.error(error);
     setComposerHint('No se pudo descargar la imagen. Intenta de nuevo.');
   }
+}
+
+async function autoSaveReceivedImage(message, src) {
+  const key = messageKey(message);
+  if (!key || state.autoSavedImages.has(key)) {
+    return;
+  }
+  state.autoSavedImages.add(key);
+  persistAutoSavedImages();
+
+  if (document.hidden) {
+    return;
+  }
+
+  window.setTimeout(() => {
+    downloadImageAsset(message, src).catch((error) => console.error(error));
+  }, 250);
 }
 
 function scheduleImageRetry(message) {

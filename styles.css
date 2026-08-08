@@ -309,6 +309,10 @@ textarea {
   font-size: 0.85rem;
 }
 
+.image-download.saved {
+  opacity: 0.7;
+}
+
 .composer {
   margin-top: 12px;
   padding: 8px;
