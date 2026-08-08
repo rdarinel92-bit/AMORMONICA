@@ -27,6 +27,7 @@ const IMAGE_UPLOAD_MAX_RETRIES = 4;
 const IMAGE_UPLOAD_RETRY_BASE_MS = 1500;
 const IMAGE_DRAFT_PREVIEW_ENABLED = false;
 const RESET_FUNCTION_TIMEOUT_MS = 25000;
+const HISTORY_PAGE_SIZE = 80;
 const ENC_PREFIX = 'enc:v1:';
 const DAILY_UNLOCK_MS = 24 * 60 * 60 * 1000;
 const imageCache = new Map();
@@ -90,6 +91,8 @@ const state = {
   lastSyncAt: null,
   pendingUploadsCount: 0,
   initialized: false,
+  historyOldestTimestamp: null,
+  historyHasMore: true,
   deviceId: localStorage.getItem(STORAGE_KEYS.deviceId) || '',
   identityByDevice: loadJson(STORAGE_KEYS.identityByDevice, {}),
   imageDraft: null,
@@ -296,6 +299,18 @@ function bindUi() {
     setComposerHint('Sincronización manual completada.');
   });
 
+  if (elements.loadMoreHistory) {
+    elements.loadMoreHistory.addEventListener('click', async () => {
+      if (!state.historyHasMore) {
+        setComposerHint('No hay más mensajes anteriores.');
+        return;
+      }
+      setComposerHint('Cargando mensajes anteriores...');
+      await refreshHistory({ older: true });
+      updateSyncSummary();
+    });
+  }
+
   if (elements.hardRefresh) {
     elements.hardRefresh.addEventListener('click', async () => {
       setComposerHint('Actualizando aplicación...');
@@ -433,6 +448,8 @@ function bindUi() {
     disconnectRealtime();
     updateConnectionUi();
     if (isConfigured()) {
+        state.historyOldestTimestamp = null;
+        state.historyHasMore = true;
       await refreshHistory();
       connectRealtime();
       flushQueues();
@@ -443,7 +460,9 @@ function bindUi() {
   });
 
   elements.reloadHistory.addEventListener('click', () => {
-    refreshHistory();
+    state.historyOldestTimestamp = null;
+    state.historyHasMore = true;
+    refreshHistory({ all: true });
   });
 
   elements.resetRoom?.addEventListener('click', async () => {
@@ -2299,12 +2318,16 @@ async function flushQueues() {
 }
 
 async function refreshHistory(options = {}) {
-  const { silent = false } = options;
+  const { silent = false, older = false, all = false } = options;
   if (!isConfigured()) {
     return;
   }
   try {
-    const remoteMessages = await fetchMessagesRemote();
+    const fetched = all
+      ? await fetchMessagesRemote({ all: true })
+      : await fetchMessagesRemote({ older, limit: HISTORY_PAGE_SIZE + 1 });
+    const hasMore = !all && fetched.length > HISTORY_PAGE_SIZE;
+    const remoteMessages = hasMore ? fetched.slice(0, HISTORY_PAGE_SIZE) : fetched;
     const remoteLocalIds = new Set();
     for (const rawMessage of remoteMessages) {
       const message = await hydrateIncomingMessage(rawMessage);
@@ -2317,12 +2340,30 @@ async function refreshHistory(options = {}) {
       upsertMessage(message);
       syncMessageReceipt(message);
     }
-    pruneMissingSessionMessages(remoteLocalIds);
+    if (all) {
+      pruneMissingSessionMessages(remoteLocalIds);
+    }
+    if (remoteMessages.length > 0) {
+      const ordered = remoteMessages
+        .map((item) => item.timestamp)
+        .filter(Boolean)
+        .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+      if (ordered.length > 0) {
+        state.historyOldestTimestamp = ordered[0];
+      }
+    }
+    if (all) {
+      state.historyHasMore = false;
+    } else if (remoteMessages.length === 0) {
+      state.historyHasMore = false;
+    } else {
+      state.historyHasMore = hasMore;
+    }
     persistKnownRemoteIds();
     state.lastSyncAt = new Date().toISOString();
     updateSyncSummary();
     if (!silent) {
-      setComposerHint('Historial cargado.');
+      setComposerHint(all ? 'Historial completo cargado.' : 'Historial reciente cargado.');
     }
   } catch (error) {
     console.error(error);
@@ -2332,16 +2373,28 @@ async function refreshHistory(options = {}) {
   }
 }
 
-async function fetchMessagesRemote() {
+async function fetchMessagesRemote(options = {}) {
+  const { older = false, all = false, limit = HISTORY_PAGE_SIZE } = options;
   const filter = encodeURIComponent(`session_id=eq.${state.config.sessionId}`);
-  const url = `${state.config.supabaseUrl}/rest/v1/messages?select=*&${filter}&order=timestamp.asc`;
+  const parts = [`select=*`, filter];
+  if (!all) {
+    if (older && state.historyOldestTimestamp) {
+      parts.push(`timestamp=lt.${encodeURIComponent(state.historyOldestTimestamp)}`);
+    }
+    parts.push('order=timestamp.desc');
+    parts.push(`limit=${encodeURIComponent(String(limit))}`);
+  } else {
+    parts.push('order=timestamp.asc');
+  }
+  const url = `${state.config.supabaseUrl}/rest/v1/messages?${parts.join('&')}`;
   const response = await fetch(url, {
     headers: supabaseHeaders()
   });
   if (!response.ok) {
     throw new Error('Fallo al leer mensajes');
   }
-  return response.json();
+  const rows = await response.json();
+  return all ? rows : rows.reverse();
 }
 
 async function fetchMessagesForResetFallback() {
@@ -2949,6 +3002,13 @@ function updateSyncSummary() {
   elements.netRoom.textContent = state.config.sessionId || '-';
   elements.netLastSync.textContent = state.lastSyncAt ? formatDate(state.lastSyncAt) : 'nunca';
   elements.netPending.textContent = String(state.queuedTexts.length + state.pendingUploadsCount);
+  if (elements.reloadHistory) {
+    elements.reloadHistory.textContent = state.historyHasMore ? 'Recargar historial' : 'Historial completo';
+  }
+  if (elements.loadMoreHistory) {
+    elements.loadMoreHistory.disabled = !state.historyHasMore;
+    elements.loadMoreHistory.textContent = state.historyHasMore ? 'Cargar mensajes anteriores' : 'Sin más mensajes';
+  }
 }
 
 function getTargetImageKb() {
