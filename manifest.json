@@ -1,0 +1,18 @@
+{
+  "name": "Chat Privado Ligero",
+  "short_name": "Chat Ligero",
+  "description": "Chat privado optimizado para conexiones lentas, con caché local y modo instalable.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

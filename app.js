@@ -6,7 +6,8 @@ const STORAGE_KEYS = {
   configLocked: 'chat-lite-config-locked',
   identity: 'chat-lite-identity',
   autoSavedImages: 'chat-lite-auto-saved-images',
-  forceImages: 'chat-lite-force-images'
+  forceImages: 'chat-lite-force-images',
+  e2eeUnlockUntil: 'chat-lite-e2ee-unlock-until'
 };
 
 const DB_NAME = 'chat-lite-db';
@@ -17,7 +18,9 @@ const CHUNK_SIZE = 5 * 1024;
 const HEARTBEAT_MS = 25000;
 const PROBE_HISTORY = 8;
 const ENC_PREFIX = 'enc:v1:';
+const DAILY_UNLOCK_MS = 24 * 60 * 60 * 1000;
 const imageCache = new Map();
+let deferredInstallPrompt = null;
 const COMMON_TYPO_FIXES = {
   adme: 'dame',
   corectas: 'correctas',
@@ -62,6 +65,7 @@ const state = {
   imageRetryTimers: new Map(),
   autoSavedImages: new Set(loadJson(STORAGE_KEYS.autoSavedImages, [])),
   forceImages: loadJson(STORAGE_KEYS.forceImages, false),
+  e2eeUnlockUntil: loadJson(STORAGE_KEYS.e2eeUnlockUntil, 0),
   e2eeKeyPromise: null,
   e2eeKeyFingerprint: '',
   lastSyncAt: null,
@@ -74,6 +78,7 @@ const elements = {
   netPanel: document.getElementById('net-panel'),
   syncNow: document.getElementById('sync-now'),
   forceImages: document.getElementById('force-images'),
+  installApp: document.getElementById('install-app'),
   netUser: document.getElementById('net-user'),
   netRoom: document.getElementById('net-room'),
   netLastSync: document.getElementById('net-last-sync'),
@@ -122,9 +127,11 @@ boot().catch((error) => {
 
 async function boot() {
   bindUi();
+  registerPwa();
   applyConfigToForm();
   setComposerLocked(true);
   await ensureIdentitySelected();
+  await ensureE2EEUnlocked(true);
   elements.setupRequirements.textContent = buildSetupRequirements();
   renderMessages();
   updateQueueSize();
@@ -172,6 +179,41 @@ function bindUi() {
         : 'Forzar imagen desactivado. Se prioriza texto en red dificil.');
     });
   }
+
+  if (elements.installApp) {
+    elements.installApp.addEventListener('click', async () => {
+      if (!deferredInstallPrompt) {
+        setComposerHint('La instalacion aun no esta disponible en este navegador.');
+        return;
+      }
+      deferredInstallPrompt.prompt();
+      const choice = await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      elements.installApp.hidden = true;
+      elements.installApp.setAttribute('aria-hidden', 'true');
+      setComposerHint(choice.outcome === 'accepted'
+        ? 'Instalacion iniciada.'
+        : 'Instalacion cancelada.');
+    });
+  }
+
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    if (elements.installApp) {
+      elements.installApp.hidden = false;
+      elements.installApp.setAttribute('aria-hidden', 'false');
+    }
+  });
+
+  window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null;
+    if (elements.installApp) {
+      elements.installApp.hidden = true;
+      elements.installApp.setAttribute('aria-hidden', 'true');
+    }
+    setComposerHint('Aplicacion instalada.');
+  });
 
   document.addEventListener('click', (event) => {
     const target = event.target;
@@ -221,6 +263,8 @@ function bindUi() {
       e2eePassphrase: nextPassphrase
     };
     resetE2EECache();
+    state.e2eeUnlockUntil = 0;
+    saveJson(STORAGE_KEYS.e2eeUnlockUntil, state.e2eeUnlockUntil);
     saveJson(STORAGE_KEYS.config, state.config);
     elements.setupRequirements.textContent = buildSetupRequirements();
     disconnectRealtime();
@@ -245,8 +289,13 @@ function bindUi() {
     if (!text) {
       return;
     }
-    elements.messageInput.value = '';
-    await enqueueTextMessage(text);
+    try {
+      await enqueueTextMessage(text);
+      elements.messageInput.value = '';
+    } catch (error) {
+      console.error(error);
+      setComposerHint('No se pudo enviar: clave E2E pendiente o invalida.');
+    }
   });
 
   elements.messageInput.addEventListener('input', () => {
@@ -295,6 +344,17 @@ function bindUi() {
       updateSyncSummary();
     }
   });
+}
+
+async function registerPwa() {
+  if (!('serviceWorker' in navigator)) {
+    return;
+  }
+  try {
+    await navigator.serviceWorker.register('sw.js');
+  } catch (error) {
+    console.warn('No se pudo registrar el service worker', error);
+  }
 }
 
 function applyConfigToForm() {
@@ -528,6 +588,23 @@ function renderMessages() {
       const text = document.createElement('p');
       text.textContent = message.display_content || message.content || '';
       body.appendChild(text);
+
+      if (own) {
+        const actions = document.createElement('div');
+        actions.className = 'message-actions';
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'button ghost message-edit';
+        editButton.textContent = 'Editar';
+        editButton.addEventListener('click', () => {
+          editOwnTextMessage(message).catch((error) => {
+            console.error(error);
+            setComposerHint('No se pudo editar el mensaje.');
+          });
+        });
+        actions.appendChild(editButton);
+        body.appendChild(actions);
+      }
     }
 
     elements.chatLog.appendChild(fragment);
@@ -549,7 +626,7 @@ function buildStatusLabel(message) {
     return 'leido';
   }
   if (message.status === 'resumed') {
-    return 'reanudado';
+    return 'enviado';
   }
   if (message.status === 'sent') {
     return 'enviado';
@@ -736,6 +813,71 @@ async function enqueueTextMessage(text) {
   flushQueues();
 }
 
+async function editOwnTextMessage(message) {
+  if (!message || message.type !== 'text' || !isOwnMessage(message)) {
+    return;
+  }
+
+  const current = String(message.display_content || message.content || '');
+  const edited = window.prompt('Editar mensaje', current);
+  if (edited === null) {
+    return;
+  }
+
+  const normalized = normalizeOutgoingText(edited);
+  if (!normalized) {
+    setComposerHint('El mensaje no puede quedar vacio.');
+    return;
+  }
+
+  if (normalized === current) {
+    return;
+  }
+
+  const encoded = await encodeOutgoingText(normalized);
+  const localPatch = {
+    ...message,
+    content: encoded.wire,
+    display_content: normalized,
+    encrypted: encoded.encrypted
+  };
+
+  upsertMessage(localPatch);
+
+  const queuedIndex = state.queuedTexts.findIndex((item) => item.local_id === message.local_id);
+  if (queuedIndex >= 0) {
+    state.queuedTexts[queuedIndex] = {
+      ...state.queuedTexts[queuedIndex],
+      content: encoded.wire,
+      display_content: normalized,
+      encrypted: encoded.encrypted
+    };
+    persistQueuedTexts();
+    setComposerHint('Mensaje editado localmente. Se enviara en cuanto haya conexion.');
+    return;
+  }
+
+  if (!isConfigured()) {
+    setComposerHint('No se pudo sincronizar la edicion: falta configuracion.');
+    return;
+  }
+
+  if (!state.online) {
+    setComposerHint('Sin conexion. Solo se edito localmente.');
+    return;
+  }
+
+  try {
+    await updateMessageRemote(message.local_id, {
+      content: encoded.wire
+    });
+    setComposerHint('Mensaje editado.');
+  } catch (error) {
+    console.error(error);
+    setComposerHint('No se pudo sincronizar la edicion del mensaje.');
+  }
+}
+
 async function enqueueImageMessage(file) {
   if (!isConfigured()) {
     setComposerHint('Configura Supabase antes de enviar imagenes.');
@@ -867,12 +1009,11 @@ async function processUploadJob(job) {
   const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
   await uploadFileToStorage(manifestPath, manifestBlob);
 
-  const finalStatus = liveJob.resumed ? 'resumed' : 'sent';
   const manifestUrl = publicStorageUrl(manifestPath);
-  await finalizeImageMessage(liveJob.id, manifestUrl, finalStatus, liveJob.chunks.length);
+  await finalizeImageMessage(liveJob.id, manifestUrl, liveJob.chunks.length);
   await dbDelete(UPLOAD_STORE, liveJob.id);
   updateQueueSize();
-  setComposerHint('Imagen enviada.');
+  setComposerHint(liveJob.resumed ? 'Imagen enviada tras reanudar la subida.' : 'Imagen enviada.');
 }
 
 async function patchImageProgress(job) {
@@ -891,13 +1032,13 @@ async function patchImageProgress(job) {
   }
 }
 
-async function finalizeImageMessage(localId, manifestUrl, status, totalChunks) {
+async function finalizeImageMessage(localId, manifestUrl, totalChunks) {
   const localMessage = state.messages.find((item) => item.local_id === localId);
   if (localMessage) {
     upsertMessage({
       ...localMessage,
       content: manifestUrl,
-      status,
+      status: 'sent',
       chunks_sent: totalChunks,
       chunks_total: totalChunks
     });
@@ -908,7 +1049,7 @@ async function finalizeImageMessage(localId, manifestUrl, status, totalChunks) {
     type: 'image',
     content: manifestUrl,
     timestamp: localMessage ? localMessage.timestamp : new Date().toISOString(),
-    status,
+    status: 'sent',
     chunks_total: totalChunks,
     chunks_sent: totalChunks,
     session_id: state.config.sessionId,
@@ -916,9 +1057,31 @@ async function finalizeImageMessage(localId, manifestUrl, status, totalChunks) {
   };
 
   try {
-    await updateMessageRemote(localId, payload);
+    await upsertMessageRemote(payload);
   } catch {
-    await insertMessageRemote(payload);
+    await updateMessageRemote(localId, payload).catch(async () => {
+      await insertMessageRemote(payload);
+    });
+  }
+}
+
+async function upsertMessageRemote(message) {
+  const url = `${state.config.supabaseUrl}/rest/v1/messages?on_conflict=session_id,local_id`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      ...supabaseHeaders(),
+      Prefer: 'resolution=merge-duplicates,return=representation'
+    },
+    body: JSON.stringify([message])
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  const rows = await response.json();
+  if (rows[0]) {
+    const hydrated = await hydrateIncomingMessage(rows[0]);
+    upsertMessage(hydrated);
   }
 }
 
@@ -1450,6 +1613,38 @@ function isE2EEEnabled() {
   return Boolean(state.config.e2eePassphrase);
 }
 
+function isE2EEUnlocked() {
+  return Date.now() < Number(state.e2eeUnlockUntil || 0);
+}
+
+async function ensureE2EEUnlocked(interactive) {
+  if (!isE2EEEnabled()) {
+    return true;
+  }
+  if (isE2EEUnlocked()) {
+    return true;
+  }
+  if (!interactive) {
+    return false;
+  }
+
+  const promptText = 'Clave E2E (solo se pedira una vez al dia):';
+  const typed = window.prompt(promptText, '');
+  if (typed === null) {
+    setComposerHint('Cifrado bloqueado. Puedes seguir leyendo, pero mensajes cifrados quedaran ocultos.');
+    return false;
+  }
+  if (typed.trim() !== String(state.config.e2eePassphrase || '').trim()) {
+    setComposerHint('Clave E2E incorrecta.');
+    return false;
+  }
+
+  state.e2eeUnlockUntil = Date.now() + DAILY_UNLOCK_MS;
+  saveJson(STORAGE_KEYS.e2eeUnlockUntil, state.e2eeUnlockUntil);
+  setComposerHint('Clave aceptada. No se volvera a pedir hoy.');
+  return true;
+}
+
 function resetE2EECache() {
   state.e2eeKeyPromise = null;
   state.e2eeKeyFingerprint = '';
@@ -1458,6 +1653,9 @@ function resetE2EECache() {
 async function getE2EEKey() {
   if (!isE2EEEnabled()) {
     return null;
+  }
+  if (!await ensureE2EEUnlocked(false)) {
+    throw new Error('E2E bloqueado');
   }
   const fingerprint = `${state.config.sessionId}|${state.config.e2eePassphrase}`;
   if (state.e2eeKeyPromise && state.e2eeKeyFingerprint === fingerprint) {
@@ -1485,6 +1683,9 @@ async function deriveAesKey(passphrase, sessionId) {
 async function encodeOutgoingText(plainText) {
   if (!isE2EEEnabled()) {
     return { wire: plainText, encrypted: false };
+  }
+  if (!await ensureE2EEUnlocked(true)) {
+    throw new Error('E2E no desbloqueado');
   }
   const key = await getE2EEKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));

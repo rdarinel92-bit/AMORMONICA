@@ -85,6 +85,13 @@ button {
   border-bottom: 1px solid var(--line);
 }
 
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .topbar h1 {
   margin: 0;
   font-size: 1.3rem;
@@ -304,6 +311,17 @@ textarea {
 .message-body p {
   margin: 0;
   white-space: pre-wrap;
+}
+
+.message-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.message-edit {
+  padding: 4px 8px;
+  font-size: 0.8rem;
 }
 
 .message-body img {

@@ -4,7 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Chat Privado Ligero</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -14,7 +18,10 @@
         <h1>Chat Privado Ligero</h1>
         <p class="subtitle">Una sola pagina, optimizada para conexiones lentas. Usuario: <strong id="active-user">cargando...</strong></p>
       </div>
-      <button id="toggle-setup" type="button" class="button ghost" hidden aria-hidden="true">Config</button>
+      <div class="topbar-actions">
+        <button id="install-app" type="button" class="button ghost" hidden aria-hidden="true">Instalar</button>
+        <button id="toggle-setup" type="button" class="button ghost" hidden aria-hidden="true">Config</button>
+      </div>
     </header>
 
     <section id="identity-gate" class="identity-gate" hidden>
