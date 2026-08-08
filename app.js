@@ -22,7 +22,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v48';
+const APP_VERSION = '2026-08-08-v49';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -740,7 +740,7 @@ function bindUi() {
       elements.installApp.hidden = true;
       elements.installApp.setAttribute('aria-hidden', 'true');
     }
-    setComposerHint('Aplicación instalada.');
+    setComposerHint('\u2713 ¡Instalada! Búscala en tu pantalla de inicio o en el cajón de apps. Si no la ves, desliza hacia la derecha en el home.');
   });
 
   document.addEventListener('visibilitychange', () => {
