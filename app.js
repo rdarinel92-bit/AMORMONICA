@@ -14,7 +14,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v11';
+const APP_VERSION = '2026-08-08-v12';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -157,6 +157,7 @@ const elements = {
   exportEndpoint: document.getElementById('export-endpoint'),
   exportEmail: document.getElementById('export-email'),
   reloadHistory: document.getElementById('reload-history'),
+  resetRoom: document.getElementById('reset-room'),
   exportHistory: document.getElementById('export-history'),
   downloadTranscript: document.getElementById('download-transcript'),
   setupRequirements: document.getElementById('setup-requirements'),
@@ -436,6 +437,10 @@ function bindUi() {
 
   elements.reloadHistory.addEventListener('click', () => {
     refreshHistory();
+  });
+
+  elements.resetRoom?.addEventListener('click', async () => {
+    await resetCurrentRoomForAll();
   });
 
   elements.messageForm.addEventListener('submit', async (event) => {
@@ -2323,6 +2328,101 @@ async function fetchMessagesRemote() {
   return response.json();
 }
 
+async function resetCurrentRoomForAll() {
+  if (!isConfigured()) {
+    setComposerHint('Configura Supabase antes de reiniciar la sala.');
+    return;
+  }
+
+  const actor = normalizeIdentity(state.config.senderId || state.identity);
+  if (actor !== 'roberto') {
+    setComposerHint('Solo Roberto puede reiniciar la sala para todos.');
+    return;
+  }
+
+  const confirmed = window.confirm(`Esto borrará para TODOS la sala "${state.config.sessionId}". ¿Continuar?`);
+  if (!confirmed) {
+    setComposerHint('Reinicio de sala cancelado.');
+    return;
+  }
+
+  const phrase = window.prompt('Escribe BORRAR para confirmar el reinicio total de la sala:');
+  if (phrase !== 'BORRAR') {
+    setComposerHint('Confirmación inválida. No se realizó el reinicio.');
+    return;
+  }
+
+  setComposerLocked(true);
+  try {
+    setComposerHint('Borrando historial e imágenes de la sala...');
+    const remoteMessages = await fetchMessagesRemote();
+    for (const message of remoteMessages) {
+      if (message && message.type === 'image' && message.content) {
+        try {
+          await deleteOwnImageAssets(message);
+        } catch (error) {
+          console.error(error);
+        }
+      }
+    }
+
+    await deleteMessagesByCurrentSessionRemote();
+    await clearCurrentRoomLocalState();
+    await refreshHistory({ silent: true });
+    setComposerHint('Sala reiniciada para todos.');
+  } catch (error) {
+    console.error(error);
+    setComposerHint('No se pudo reiniciar la sala. Revisa permisos DELETE en messages y storage.objects.');
+  } finally {
+    setComposerLocked(false);
+  }
+}
+
+async function deleteMessagesByCurrentSessionRemote() {
+  const url = `${state.config.supabaseUrl}/rest/v1/messages?session_id=eq.${encodeURIComponent(state.config.sessionId)}`;
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      ...supabaseHeaders(),
+      Prefer: 'return=minimal'
+    }
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+}
+
+async function clearCurrentRoomLocalState() {
+  state.messages = [];
+  state.queuedTexts = [];
+  state.knownRemoteIds = new Set();
+  state.imageDraftQueue = [];
+  state.imageDraft = null;
+  state.imageDraftFile = null;
+  state.canceledUploadIds.clear();
+
+  for (const timer of state.imageRetryTimers.values()) {
+    window.clearTimeout(timer);
+  }
+  state.imageRetryTimers.clear();
+
+  for (const timer of state.uploadRetryTimers.values()) {
+    window.clearTimeout(timer);
+  }
+  state.uploadRetryTimers.clear();
+
+  persistMessages();
+  persistQueuedTexts();
+  persistKnownRemoteIds();
+  closImageDraftPanel();
+  imageCache.clear();
+  await dbClear(UPLOAD_STORE);
+  await dbClear(CACHE_STORE);
+  updateQueueSize();
+  updateSyncSummary();
+  renderMessages();
+}
+
 async function insertMessageRemote(message) {
   const response = await fetch(`${state.config.supabaseUrl}/rest/v1/messages`, {
     method: 'POST',
@@ -3132,6 +3232,18 @@ function dbDelete(storeName, key) {
       return;
     }
     const request = dbStore(storeName, 'readwrite').delete(key);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function dbClear(storeName) {
+  return new Promise((resolve, reject) => {
+    if (!state.db) {
+      resolve();
+      return;
+    }
+    const request = dbStore(storeName, 'readwrite').clear();
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
