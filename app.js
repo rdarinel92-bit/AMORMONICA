@@ -555,11 +555,48 @@ async function renderImageMessage(message, container, loadingNode) {
     image.addEventListener('click', () => {
       window.open(src, '_blank', 'noopener');
     });
-    loadingNode.replaceWith(image);
+    const actions = document.createElement('div');
+    actions.className = 'image-actions';
+
+    const downloadButton = document.createElement('button');
+    downloadButton.type = 'button';
+    downloadButton.className = 'button ghost button-icon image-download';
+    downloadButton.innerHTML = '<span class="icon">⇩</span><span>Descargar imagen</span>';
+    downloadButton.addEventListener('click', async () => {
+      await downloadImageAsset(message, src);
+    });
+
+    actions.appendChild(downloadButton);
+
+    const frame = document.createElement('div');
+    frame.className = 'image-frame';
+    frame.appendChild(image);
+    frame.appendChild(actions);
+
+    loadingNode.replaceWith(frame);
   } catch (error) {
     loadingNode.textContent = 'Imagen atrasada. Reintentando...';
     scheduleImageRetry(message);
     console.error(error);
+  }
+}
+
+async function downloadImageAsset(message, src) {
+  try {
+    const resolved = src || (message.content ? await resolveImageSource(message.content) : '');
+    if (!resolved) {
+      throw new Error('No hay imagen para descargar');
+    }
+    const anchor = document.createElement('a');
+    anchor.href = resolved;
+    anchor.download = `imagen-${message.local_id || message.id || Date.now()}.jpg`;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } catch (error) {
+    console.error(error);
+    setComposerHint('No se pudo descargar la imagen. Intenta de nuevo.');
   }
 }
 

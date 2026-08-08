@@ -219,6 +219,19 @@ textarea {
   color: var(--fg);
 }
 
+.button-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.button-icon .icon {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.4em;
+  font-weight: 700;
+}
+
 .chat-log {
   min-height: 45vh;
   border: 1px solid var(--line);
@@ -281,9 +294,31 @@ textarea {
   border: 1px solid var(--line);
 }
 
+.image-frame {
+  display: grid;
+  gap: 8px;
+}
+
+.image-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.image-download {
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
 .composer {
   margin-top: 12px;
   padding: 8px;
+}
+
+.composer-fixed {
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  backdrop-filter: blur(2px);
 }
 
 .composer.locked {
@@ -293,6 +328,10 @@ textarea {
 .composer-form {
   display: grid;
   gap: 8px;
+}
+
+.composer-fixed .composer-form {
+  margin: 0;
 }
 
 pre {
@@ -316,6 +355,10 @@ pre {
 
   .message {
     max-width: 90%;
+  }
+
+  .composer-fixed {
+    bottom: 8px;
   }
 }
 
