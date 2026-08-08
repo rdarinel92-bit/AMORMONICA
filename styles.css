@@ -130,20 +130,21 @@ button {
 
 .profile-floating {
   position: fixed;
-  top: 14px;
-  right: 14px;
-  z-index: 50;
+  top: 10px;
+  right: 10px;
+  z-index: 120;
   display: flex;
   align-items: center;
   gap: 8px;
+  pointer-events: auto;
 }
 
 .profile-avatar {
   position: relative;
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
-  background: var(--card);
+  background: linear-gradient(180deg, #263146 0%, #1c2535 100%);
   border: 2px solid var(--line);
   cursor: pointer;
   display: flex;
@@ -152,6 +153,7 @@ button {
   overflow: hidden;
   transition: all 0.2s ease;
   flex-shrink: 0;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
 .profile-avatar:hover {
@@ -163,6 +165,19 @@ button {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
+}
+
+.profile-avatar-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #d9e7ff;
+  text-transform: uppercase;
+  pointer-events: none;
 }
 
 .profile-camera-icon {
@@ -578,8 +593,8 @@ pre {
   }
 
   .profile-avatar {
-    width: 36px;
-    height: 36px;
+    width: 38px;
+    height: 38px;
   }
 
   .profile-camera-icon {

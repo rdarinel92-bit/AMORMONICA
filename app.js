@@ -142,7 +142,8 @@ const elements = {
   draftChangeButton: document.getElementById('draft-change'),
   draftDiscardButton: document.getElementById('draft-discard'),
   profilePhotoInput: document.getElementById('profile-photo-input'),
-  profileAvatarImg: document.getElementById('profile-avatar-img')
+  profileAvatarImg: document.getElementById('profile-avatar-img'),
+  profileAvatarFallback: document.getElementById('profile-avatar-fallback')
 };
 
 boot().catch((error) => {
@@ -558,7 +559,23 @@ function formatUserName(value) {
 
 function updateActiveUserUi() {
   elements.activeUser.textContent = formatUserName(state.config.senderId || state.identity);
+  updateProfileFallbackInitial();
   updateSyncSummary();
+}
+
+function updateProfileFallbackInitial() {
+  const name = formatUserName(state.config.senderId || state.identity || 'U');
+  const initial = String(name || 'U').trim().charAt(0).toUpperCase() || 'U';
+  if (elements.profileAvatarFallback) {
+    elements.profileAvatarFallback.textContent = initial;
+  }
+}
+
+function syncProfileAvatarVisibility() {
+  const hasSrc = Boolean(elements.profileAvatarImg && elements.profileAvatarImg.src);
+  if (elements.profileAvatarFallback) {
+    elements.profileAvatarFallback.style.opacity = hasSrc ? '0' : '1';
+  }
 }
 
 function setComposerLocked(locked) {
@@ -659,10 +676,12 @@ async function saveProfilePhoto(file) {
     const instantPreviewUrl = URL.createObjectURL(file);
     elements.profileAvatarImg.src = instantPreviewUrl;
     elements.profileAvatarImg.style.opacity = '1';
+    syncProfileAvatarVisibility();
 
     const optimizedDataUrl = await optimizeProfilePhoto(file);
     localStorage.setItem(STORAGE_KEYS.profilePhoto, optimizedDataUrl);
     elements.profileAvatarImg.src = optimizedDataUrl;
+    syncProfileAvatarVisibility();
     setComposerHint('Foto de perfil actualizada.');
     window.setTimeout(() => URL.revokeObjectURL(instantPreviewUrl), 1000);
   } catch (error) {
@@ -673,11 +692,15 @@ async function saveProfilePhoto(file) {
 
 function loadProfilePhoto() {
   try {
+    updateProfileFallbackInitial();
     const photoDataUrl = localStorage.getItem(STORAGE_KEYS.profilePhoto);
     if (photoDataUrl) {
       elements.profileAvatarImg.src = photoDataUrl;
       elements.profileAvatarImg.style.opacity = '1';
+    } else {
+      elements.profileAvatarImg.removeAttribute('src');
     }
+    syncProfileAvatarVisibility();
   } catch (error) {
     console.error(error);
   }
