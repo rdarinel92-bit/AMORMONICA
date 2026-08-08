@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   haptics: 'chat-lite-haptics',
   e2eeUnlockUntil: 'chat-lite-e2ee-unlock-until',
   profilePhoto: 'chat-lite-profile-photo',
+  identityEntryMessage: 'chat-lite-identity-entry-message',
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
@@ -181,6 +182,7 @@ const elements = {
   identityEntryProgress: document.getElementById('identity-entry-progress'),
   identityEntryMessage: document.getElementById('identity-entry-message'),
   identityProgressFill: document.getElementById('identity-progress-fill'),
+  identityEntryCustomMessage: document.getElementById('identity-entry-custom-message'),
   identityCustom: document.getElementById('identity-custom'),
   identityCustomSubmit: document.getElementById('identity-custom-submit'),
   toggleSetup: document.getElementById('toggle-setup'),
@@ -1093,6 +1095,7 @@ function ensureIdentitySelected() {
       loadActiveUserState();
       elements.senderId.value = state.config.senderId;
       elements.identityCustom.value = chosen;
+      syncIdentityCustomEntryMessage(chosen);
       state.pendingUrlIdentity = '';
       setIdentityGateVisible(false);
       updateActiveUserUi();
@@ -1112,6 +1115,7 @@ function ensureIdentitySelected() {
     if (state.identityByDevice[deviceId]) {
       elements.identityCustom.value = normalizeIdentity(state.identityByDevice[deviceId]);
     }
+    syncIdentityCustomEntryMessage(elements.identityCustom.value || '');
 
     const choose = (rawName) => {
       const name = normalizeIdentity(rawName);
@@ -1131,6 +1135,7 @@ function ensureIdentitySelected() {
       saveJson(STORAGE_KEYS.identity, state.identity);
       saveJson(STORAGE_KEYS.identityByDevice, state.identityByDevice);
       saveJson(STORAGE_KEYS.config, state.config);
+      persistIdentityCustomEntryMessage(name);
       loadActiveUserState();
       elements.senderId.value = state.config.senderId;
 
@@ -1150,11 +1155,16 @@ function ensureIdentitySelected() {
     elements.identityRoberto.onclick = () => choose('roberto');
     elements.identityMonica.onclick = () => choose('monica');
     elements.identityCustomSubmit.onclick = () => choose(elements.identityCustom.value);
+    elements.identityRoberto.onfocus = () => syncIdentityCustomEntryMessage('roberto');
+    elements.identityMonica.onfocus = () => syncIdentityCustomEntryMessage('monica');
     elements.identityCustom.onkeydown = (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
         choose(elements.identityCustom.value);
       }
+    };
+    elements.identityCustom.oninput = () => {
+      syncIdentityCustomEntryMessage(elements.identityCustom.value);
     };
   });
 }
@@ -4758,6 +4768,7 @@ async function runIdentityEntryProgress(name) {
   }
 
   const readableName = formatUserName(name);
+  const customIdentityMessage = getIdentityCustomEntryMessage(name);
   for (const step of IDENTITY_ENTRY_STEPS) {
     if (elements.identityProgressFill) {
       elements.identityProgressFill.style.width = `${step.pct}%`;
@@ -4767,7 +4778,10 @@ async function runIdentityEntryProgress(name) {
       track.setAttribute('aria-valuenow', String(step.pct));
     }
     if (elements.identityEntryMessage) {
-      const customText = step.text.includes('mi amor') ? `${step.text}` : `${step.text.replace('ustedes', readableName)}`;
+      let customText = step.text.includes('mi amor') ? `${step.text}` : `${step.text.replace('ustedes', readableName)}`;
+      if (step.pct >= 100 && customIdentityMessage) {
+        customText = customIdentityMessage;
+      }
       elements.identityEntryMessage.textContent = customText;
     }
     await wait(step.pct >= 100 ? 260 : 220);
@@ -4803,6 +4817,46 @@ function paintIdentityProfileChip(identity, avatarImage, fallbackNode, defaultIn
   avatarImage.removeAttribute('src');
   fallbackNode.textContent = defaultInitial;
   fallbackNode.style.opacity = '1';
+}
+
+function identityEntryMessageStorageKey(identityValue) {
+  const identity = normalizeIdentity(identityValue || '');
+  return `${STORAGE_KEYS.identityEntryMessage}:${identity || 'anon'}`;
+}
+
+function getIdentityCustomEntryMessage(identityValue) {
+  const key = identityEntryMessageStorageKey(identityValue);
+  const message = String(localStorage.getItem(key) || '').trim();
+  return message;
+}
+
+function persistIdentityCustomEntryMessage(identityValue) {
+  if (!elements.identityEntryCustomMessage) {
+    return;
+  }
+  const identity = normalizeIdentity(identityValue || '');
+  if (!identity) {
+    return;
+  }
+  const key = identityEntryMessageStorageKey(identity);
+  const message = String(elements.identityEntryCustomMessage.value || '').trim();
+  if (!message) {
+    localStorage.removeItem(key);
+    return;
+  }
+  localStorage.setItem(key, message.slice(0, 140));
+}
+
+function syncIdentityCustomEntryMessage(identityValue) {
+  if (!elements.identityEntryCustomMessage) {
+    return;
+  }
+  const identity = normalizeIdentity(identityValue || '');
+  if (!identity) {
+    elements.identityEntryCustomMessage.value = '';
+    return;
+  }
+  elements.identityEntryCustomMessage.value = getIdentityCustomEntryMessage(identity);
 }
 
 function ensureDeviceId() {
