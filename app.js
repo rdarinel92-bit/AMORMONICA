@@ -12,7 +12,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v7';
+const APP_VERSION = '2026-08-08-v8';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -86,6 +86,7 @@ const state = {
   initialized: false,
   imageDraft: null,
   imageDraftFile: null,
+  profileMenuOpen: false,
   emojiPanelOpen: false,
   emojiPanelManuallyClosed: false,
   emojiCategory: 'recientes',
@@ -177,6 +178,11 @@ const elements = {
   draftChangeButton: document.getElementById('draft-change'),
   draftDiscardButton: document.getElementById('draft-discard'),
   profilePhotoInput: document.getElementById('profile-photo-input'),
+  profileTriggerFloating: document.getElementById('profile-trigger-floating'),
+  profileTriggerTopbar: document.getElementById('profile-trigger-topbar'),
+  profileMenu: document.getElementById('profile-menu'),
+  profileChangePhoto: document.getElementById('profile-change-photo'),
+  profileClearPhoto: document.getElementById('profile-clear-photo'),
   profileAvatarImg: document.getElementById('profile-avatar-img'),
   profileAvatarFallback: document.getElementById('profile-avatar-fallback'),
   profileAvatarImgTopbar: document.getElementById('profile-avatar-img-topbar'),
@@ -356,6 +362,9 @@ function bindUi() {
     if (!target.closest('.message')) {
       clearSelectedMessage();
     }
+    if (state.profileMenuOpen && !isProfileMenuTarget(target)) {
+      hideProfileMenu();
+    }
     if (state.emojiPanelOpen && !isEmojiPanelTarget(target)) {
       hideEmojiPanel();
     }
@@ -514,6 +523,34 @@ function bindUi() {
     setComposerHint('Borrador de imagen descartado.');
   });
 
+  if (elements.profileTriggerFloating) {
+    elements.profileTriggerFloating.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleProfileMenu();
+    });
+  }
+
+  if (elements.profileTriggerTopbar) {
+    elements.profileTriggerTopbar.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleProfileMenu();
+    });
+  }
+
+  if (elements.profileChangePhoto) {
+    elements.profileChangePhoto.addEventListener('click', () => {
+      hideProfileMenu();
+      elements.profilePhotoInput?.click();
+    });
+  }
+
+  if (elements.profileClearPhoto) {
+    elements.profileClearPhoto.addEventListener('click', () => {
+      clearProfilePhoto();
+      hideProfileMenu();
+    });
+  }
+
   if (elements.emojiToggle) {
     elements.emojiToggle.addEventListener('click', () => {
       const wasOpen = state.emojiPanelOpen;
@@ -576,6 +613,16 @@ function bindUi() {
       return;
     }
     await saveProfilePhoto(file);
+  });
+
+  elements.profileMenu?.addEventListener('pointerdown', (event) => {
+    event.stopPropagation();
+  });
+
+  elements.profileMenu?.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      hideProfileMenu();
+    }
   });
 
   elements.emojiPanel?.addEventListener('pointerdown', (event) => {
@@ -3113,4 +3160,55 @@ function fixWord(word) {
     return lookup[0].toUpperCase() + lookup.slice(1);
   }
   return lookup;
+}
+
+function isProfileMenuTarget(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  return Boolean(
+    target.closest('#profile-menu') ||
+    target.closest('#profile-trigger-floating') ||
+    target.closest('#profile-trigger-topbar')
+  );
+}
+
+function showProfileMenu() {
+  if (!elements.profileMenu) {
+    return;
+  }
+  state.profileMenuOpen = true;
+  elements.profileMenu.hidden = false;
+  elements.profileTriggerFloating?.setAttribute('aria-expanded', 'true');
+  elements.profileTriggerTopbar?.setAttribute('aria-expanded', 'true');
+}
+
+function hideProfileMenu() {
+  if (!elements.profileMenu) {
+    return;
+  }
+  state.profileMenuOpen = false;
+  elements.profileMenu.hidden = true;
+  elements.profileTriggerFloating?.setAttribute('aria-expanded', 'false');
+  elements.profileTriggerTopbar?.setAttribute('aria-expanded', 'false');
+}
+
+function toggleProfileMenu() {
+  if (state.profileMenuOpen) {
+    hideProfileMenu();
+    return;
+  }
+  showProfileMenu();
+}
+
+function clearProfilePhoto() {
+  localStorage.removeItem(STORAGE_KEYS.profilePhoto);
+  elements.profileAvatarImg.removeAttribute('src');
+  elements.profileAvatarImg.style.opacity = '0';
+  if (elements.profileAvatarImgTopbar) {
+    elements.profileAvatarImgTopbar.removeAttribute('src');
+    elements.profileAvatarImgTopbar.style.opacity = '0';
+  }
+  syncProfileAvatarVisibility();
+  setComposerHint('Imagen de perfil eliminada.');
 }

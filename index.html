@@ -12,7 +12,7 @@
   <title>Chat Privado Ligero</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
   <main class="app">
@@ -22,21 +22,25 @@
         <strong id="active-user">cargando...</strong>
       </div>
       <div class="topbar-actions">
-        <label class="profile-avatar topbar-avatar-fallback" for="profile-photo-input" aria-label="Cargar foto de perfil">
+        <button id="profile-trigger-topbar" class="profile-avatar topbar-avatar-fallback" type="button" aria-label="Opciones de perfil" aria-haspopup="menu" aria-expanded="false" aria-controls="profile-menu">
           <img id="profile-avatar-img-topbar" src="" alt="">
           <span id="profile-avatar-fallback-topbar" class="profile-avatar-fallback">U</span>
-        </label>
+        </button>
         <button id="install-app" type="button" class="button ghost" hidden aria-hidden="true">Instalar</button>
         <button id="toggle-setup" type="button" class="button ghost" aria-hidden="false">Config</button>
       </div>
     </header>
 
     <div id="profile-floating" class="profile-floating">
-      <label class="profile-avatar" for="profile-photo-input" aria-label="Cargar foto de perfil">
+      <button id="profile-trigger-floating" class="profile-avatar" type="button" aria-label="Opciones de perfil" aria-haspopup="menu" aria-expanded="false" aria-controls="profile-menu">
         <img id="profile-avatar-img" src="" alt="">
         <span id="profile-avatar-fallback" class="profile-avatar-fallback">U</span>
         <span class="profile-camera-icon">📷</span>
-      </label>
+      </button>
+      <div id="profile-menu" class="profile-menu" role="menu" hidden>
+        <button id="profile-change-photo" class="profile-menu-item" type="button" role="menuitem">Cambiar imagen</button>
+        <button id="profile-clear-photo" class="profile-menu-item danger" type="button" role="menuitem">Quitar imagen</button>
+      </div>
       <input id="profile-photo-input" type="file" accept="image/*" hidden>
     </div>
 
@@ -223,6 +227,6 @@
     </article>
   </template>
 
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>
