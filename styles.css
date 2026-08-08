@@ -398,9 +398,16 @@ textarea:focus {
 .image-actions {
   display: flex;
   justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .image-download {
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.image-cancel {
   padding: 6px 10px;
   font-size: 0.85rem;
 }

@@ -26,7 +26,7 @@
 
     <section id="identity-gate" class="identity-gate" hidden>
       <div class="identity-card">
-        <h2>Quien eres?</h2>
+        <h2>¿Quién eres?</h2>
         <p class="setup-note">Elige tu usuario antes de entrar al chat.</p>
         <div class="identity-actions">
           <button id="identity-roberto" class="button" type="button">Soy Roberto</button>
@@ -41,7 +41,7 @@
     </section>
 
     <button id="net-fab" class="net-fab" type="button" aria-controls="net-panel" aria-expanded="false">Red: <span id="net-fab-mode">--</span></button>
-    <section id="net-panel" class="net-panel" aria-label="Estado de conexion" hidden>
+    <section id="net-panel" class="net-panel" aria-label="Estado de conexión" hidden>
       <div class="net-actions net-toggle-row">
         <label class="toggle-chip">
           <input id="force-images" type="checkbox">
@@ -51,7 +51,7 @@
       <div class="net-summary">
         <div><span class="label">Usuario</span><strong id="net-user">-</strong></div>
         <div><span class="label">Sala</span><strong id="net-room">-</strong></div>
-        <div><span class="label">Ultima sync</span><strong id="net-last-sync">-</strong></div>
+        <div><span class="label">Última sincronización</span><strong id="net-last-sync">-</strong></div>
         <div><span class="label">Pendientes</span><strong id="net-pending">0</strong></div>
       </div>
       <div class="setup-actions net-actions">
@@ -75,7 +75,7 @@
           <strong id="connection-stability">-</strong>
         </div>
         <div class="status-card">
-          <span class="label">Perdida</span>
+          <span class="label">Pérdida</span>
           <strong id="connection-loss">-</strong>
         </div>
         <div class="status-card">
@@ -86,9 +86,9 @@
     </section>
 
     <section id="setup-panel" class="setup-panel" hidden aria-hidden="true" style="display: none;">
-      <h2>Configuracion Supabase</h2>
-      <p class="setup-note">Usa la clave anon publica. No pongas service role en el navegador.</p>
-      <p class="setup-note">La configuracion queda bloqueada por defecto para evitar cambios accidentales.</p>
+      <h2>Configuración de Supabase</h2>
+      <p class="setup-note">Usa la clave anónima pública. No pongas service role en el navegador.</p>
+      <p class="setup-note">La configuración queda bloqueada por defecto para evitar cambios accidentales.</p>
       <form id="config-form" class="config-form">
         <label>
           Cifrado de mensajes (clave compartida)
@@ -99,7 +99,7 @@
           <input id="supabase-url" name="supabaseUrl" type="url" placeholder="https://tu-proyecto.supabase.co" autocomplete="off">
         </label>
         <label>
-          Clave anon
+          Clave anónima
           <input id="supabase-key" name="supabaseKey" type="password" placeholder="eyJ..." autocomplete="off">
         </label>
         <label>
@@ -115,7 +115,7 @@
           <input id="bucket-name" name="bucketName" type="text" value="chat-files" autocomplete="off">
         </label>
         <label>
-          Funcion exportHistory
+          Función exportHistory
           <input id="export-endpoint" name="exportEndpoint" type="text" value="exportHistory" autocomplete="off">
         </label>
         <label>
@@ -148,7 +148,7 @@
         </div>
       </form>
       <input id="image-input" type="file" accept="image/*" hidden>
-      <p id="composer-hint" class="hint">Sin audio por defecto. El modo de conexion ajusta la compresion automaticamente.</p>
+      <p id="composer-hint" class="hint">Sin audio por defecto. El modo de conexión ajusta la compresión automáticamente.</p>
     </section>
   </main>
 

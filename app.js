@@ -63,6 +63,7 @@ const state = {
   heartbeatTimer: null,
   resumeTimer: null,
   imageRetryTimers: new Map(),
+  canceledUploadIds: new Set(),
   autoSavedImages: new Set(loadJson(STORAGE_KEYS.autoSavedImages, [])),
   forceImages: loadJson(STORAGE_KEYS.forceImages, false),
   e2eeUnlockUntil: loadJson(STORAGE_KEYS.e2eeUnlockUntil, 0),
@@ -167,7 +168,7 @@ function bindUi() {
     await refreshHistory({ silent: true });
     await flushQueues();
     updateSyncSummary();
-    setComposerHint('Sincronizacion manual completada.');
+    setComposerHint('Sincronización manual completada.');
   });
 
   if (elements.forceImages) {
@@ -175,15 +176,15 @@ function bindUi() {
       state.forceImages = elements.forceImages.checked;
       saveJson(STORAGE_KEYS.forceImages, state.forceImages);
       setComposerHint(state.forceImages
-        ? 'Forzar imagen activado. Se permitiran imagenes aun con red dificil.'
-        : 'Forzar imagen desactivado. Se prioriza texto en red dificil.');
+        ? 'Forzar imagen activado. Se permitirán imágenes incluso con red difícil.'
+        : 'Forzar imagen desactivado. Se prioriza texto con red difícil.');
     });
   }
 
   if (elements.installApp) {
     elements.installApp.addEventListener('click', async () => {
       if (!deferredInstallPrompt) {
-        setComposerHint('La instalacion aun no esta disponible en este navegador.');
+        setComposerHint('La instalación aún no está disponible en este navegador.');
         return;
       }
       deferredInstallPrompt.prompt();
@@ -192,8 +193,8 @@ function bindUi() {
       elements.installApp.hidden = true;
       elements.installApp.setAttribute('aria-hidden', 'true');
       setComposerHint(choice.outcome === 'accepted'
-        ? 'Instalacion iniciada.'
-        : 'Instalacion cancelada.');
+        ? 'Instalación iniciada.'
+        : 'Instalación cancelada.');
     });
   }
 
@@ -212,7 +213,7 @@ function bindUi() {
       elements.installApp.hidden = true;
       elements.installApp.setAttribute('aria-hidden', 'true');
     }
-    setComposerHint('Aplicacion instalada.');
+    setComposerHint('Aplicación instalada.');
   });
 
   document.addEventListener('click', (event) => {
@@ -239,14 +240,14 @@ function bindUi() {
     saveJson(STORAGE_KEYS.configLocked, state.configLocked);
     applyConfigLockUi();
     setComposerHint(state.configLocked
-      ? 'Configuracion bloqueada para evitar cambios accidentales.'
-      : 'Configuracion desbloqueada. Guarda si hiciste cambios.');
+      ? 'Configuración bloqueada para evitar cambios accidentales.'
+      : 'Configuración desbloqueada. Guarda si hiciste cambios.');
   });
 
   elements.configForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (state.configLocked) {
-      setComposerHint('La configuracion esta bloqueada. Pulsa "Desbloquear config" para editar.');
+      setComposerHint('La configuración está bloqueada. Pulsa "Desbloquear config" para editar.');
       return;
     }
 
@@ -273,9 +274,9 @@ function bindUi() {
       await refreshHistory();
       connectRealtime();
       flushQueues();
-      setComposerHint('Configuracion guardada. Chat conectado si las politicas de Supabase ya estan creadas.');
+      setComposerHint('Configuración guardada. El chat se conectará si las políticas de Supabase ya están creadas.');
     } else {
-      setComposerHint('Falta URL o clave anon de Supabase.');
+      setComposerHint('Falta URL o clave anónima de Supabase.');
     }
   });
 
@@ -294,12 +295,22 @@ function bindUi() {
       elements.messageInput.value = '';
     } catch (error) {
       console.error(error);
-      setComposerHint('No se pudo enviar: clave E2E pendiente o invalida.');
+      setComposerHint('No se pudo enviar: clave E2E pendiente o inválida.');
     }
   });
 
   elements.messageInput.addEventListener('input', () => {
     applyTypingCorrections(elements.messageInput);
+  });
+
+  elements.messageInput.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowUp' && !elements.messageInput.value.trim()) {
+      event.preventDefault();
+      editLastOwnTextMessage().catch((error) => {
+        console.error(error);
+        setComposerHint('No se pudo abrir la edicion del ultimo mensaje.');
+      });
+    }
   });
 
   elements.imageInput.addEventListener('change', async (event) => {
@@ -580,6 +591,13 @@ function renderMessages() {
     root.classList.toggle('error', message.status === 'error');
 
     if (message.type === 'image') {
+      if (message.status === 'error' && !message.content) {
+        const text = document.createElement('p');
+        text.textContent = own ? 'Imagen cancelada.' : 'Imagen cancelada por el remitente.';
+        body.appendChild(text);
+        elements.chatLog.appendChild(fragment);
+        continue;
+      }
       const loading = document.createElement('p');
       loading.textContent = message.status === 'pending' ? 'Imagen pendiente...' : 'Cargando imagen...';
       body.appendChild(loading);
@@ -623,7 +641,7 @@ function buildStatusLabel(message) {
     return 'entregado';
   }
   if (message.status === 'read') {
-    return 'leido';
+    return 'leído';
   }
   if (message.status === 'resumed') {
     return 'enviado';
@@ -666,6 +684,20 @@ async function renderImageMessage(message, container, loadingNode) {
     });
 
     actions.appendChild(downloadButton);
+
+    if (isOwnMessage(message)) {
+      const controlButton = document.createElement('button');
+      controlButton.type = 'button';
+      controlButton.className = 'button ghost image-cancel';
+      controlButton.textContent = message.status === 'pending' ? 'Cancelar envio' : 'Eliminar del chat';
+      controlButton.addEventListener('click', () => {
+        cancelOrRemoveOwnImage(message).catch((error) => {
+          console.error(error);
+          setComposerHint('No se pudo completar la accion sobre la imagen.');
+        });
+      });
+      actions.appendChild(controlButton);
+    }
 
     const frame = document.createElement('div');
     frame.className = 'image-frame';
@@ -753,7 +785,7 @@ async function resolveImageSource(content) {
     const arrayBuffer = await response.arrayBuffer();
     const actualHash = await sha256Hex(arrayBuffer);
     if (actualHash !== manifest.chunks[index].sha256) {
-      throw new Error('Integridad de bloque invalida');
+      throw new Error('Integridad de bloque inválida');
     }
     buffers.push(arrayBuffer);
   }
@@ -809,7 +841,7 @@ async function enqueueTextMessage(text) {
   state.queuedTexts.push(message);
   persistQueuedTexts();
   updateQueueSize();
-  setComposerHint(state.online ? 'Enviando texto...' : 'Sin conexion. El texto quedo guardado localmente.');
+  setComposerHint(state.online ? 'Enviando texto...' : 'Sin conexión. El texto quedó guardado localmente.');
   flushQueues();
 }
 
@@ -826,7 +858,7 @@ async function editOwnTextMessage(message) {
 
   const normalized = normalizeOutgoingText(edited);
   if (!normalized) {
-    setComposerHint('El mensaje no puede quedar vacio.');
+    setComposerHint('El mensaje no puede quedar vacío.');
     return;
   }
 
@@ -853,17 +885,17 @@ async function editOwnTextMessage(message) {
       encrypted: encoded.encrypted
     };
     persistQueuedTexts();
-    setComposerHint('Mensaje editado localmente. Se enviara en cuanto haya conexion.');
+    setComposerHint('Mensaje editado localmente. Se enviará en cuanto haya conexión.');
     return;
   }
 
   if (!isConfigured()) {
-    setComposerHint('No se pudo sincronizar la edicion: falta configuracion.');
+    setComposerHint('No se pudo sincronizar la edición: falta configuración.');
     return;
   }
 
   if (!state.online) {
-    setComposerHint('Sin conexion. Solo se edito localmente.');
+    setComposerHint('Sin conexión. Solo se editó localmente.');
     return;
   }
 
@@ -874,17 +906,71 @@ async function editOwnTextMessage(message) {
     setComposerHint('Mensaje editado.');
   } catch (error) {
     console.error(error);
-    setComposerHint('No se pudo sincronizar la edicion del mensaje.');
+    setComposerHint('No se pudo sincronizar la edición del mensaje.');
   }
+}
+
+async function editLastOwnTextMessage() {
+  const ownTextMessages = state.messages.filter((item) => item.type === 'text' && isOwnMessage(item));
+  if (ownTextMessages.length === 0) {
+    setComposerHint('No tienes mensajes de texto para editar.');
+    return;
+  }
+  await editOwnTextMessage(ownTextMessages[ownTextMessages.length - 1]);
+}
+
+function removeLocalMessage(localId) {
+  const index = state.messages.findIndex((item) => item.local_id === localId);
+  if (index < 0) {
+    return null;
+  }
+  const [removed] = state.messages.splice(index, 1);
+  persistMessages();
+  renderMessages();
+  return removed;
+}
+
+async function cancelOrRemoveOwnImage(message) {
+  if (!message || message.type !== 'image' || !isOwnMessage(message) || !message.local_id) {
+    return;
+  }
+
+  const isPending = message.status === 'pending';
+  state.canceledUploadIds.add(message.local_id);
+
+  const retryKey = message.local_id || message.id || message.content;
+  const retryTimer = state.imageRetryTimers.get(retryKey);
+  if (retryTimer) {
+    window.clearTimeout(retryTimer);
+    state.imageRetryTimers.delete(retryKey);
+  }
+
+  await dbDelete(UPLOAD_STORE, message.local_id);
+
+  if (state.online && isConfigured()) {
+    await deleteMessageRemote(message.local_id).catch(async () => {
+      await updateMessageRemote(message.local_id, {
+        status: 'error',
+        content: '',
+        chunks_total: 0,
+        chunks_sent: 0
+      }).catch(() => {
+      });
+    });
+  }
+
+  removeLocalMessage(message.local_id);
+  updateQueueSize();
+  setComposerHint(isPending ? 'Envio de imagen cancelado.' : 'Imagen eliminada del chat.');
 }
 
 async function enqueueImageMessage(file) {
   if (!isConfigured()) {
-    setComposerHint('Configura Supabase antes de enviar imagenes.');
+    setComposerHint('Configura Supabase antes de enviar imágenes.');
     return;
   }
   if (state.mode === 'Ultra-ligero' && !state.forceImages) {
-    setComposerHint('Red muy lenta: la imagen quedo bloqueada. Activa Forzar imagen si la necesitas.');
+    setComposerHint('Red muy lenta: la imagen quedó bloqueada. Activa Forzar imagen si la necesitas.');
     return;
   }
   const targetKb = getTargetImageKb();
@@ -922,6 +1008,7 @@ async function enqueueImageMessage(file) {
     resumed: false
   };
 
+  state.canceledUploadIds.delete(localId);
   await dbPut(UPLOAD_STORE, uploadJob);
   await insertPendingImageMessage(message, uploadJob);
   updateQueueSize();
@@ -965,11 +1052,19 @@ async function processUploadJob(job) {
   if (!state.online || !isConfigured()) {
     return;
   }
+  if (state.canceledUploadIds.has(job.id)) {
+    await dbDelete(UPLOAD_STORE, job.id);
+    return;
+  }
   let liveJob = await dbGet(UPLOAD_STORE, job.id);
   if (!liveJob) {
     return;
   }
   for (const chunk of liveJob.chunks) {
+    if (state.canceledUploadIds.has(liveJob.id)) {
+      await dbDelete(UPLOAD_STORE, liveJob.id);
+      return;
+    }
     if (!state.online) {
       return;
     }
@@ -1009,9 +1104,14 @@ async function processUploadJob(job) {
   const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
   await uploadFileToStorage(manifestPath, manifestBlob);
 
+  if (state.canceledUploadIds.has(liveJob.id)) {
+    await dbDelete(UPLOAD_STORE, liveJob.id);
+    return;
+  }
   const manifestUrl = publicStorageUrl(manifestPath);
   await finalizeImageMessage(liveJob.id, manifestUrl, liveJob.chunks.length);
   await dbDelete(UPLOAD_STORE, liveJob.id);
+  state.canceledUploadIds.delete(liveJob.id);
   updateQueueSize();
   setComposerHint(liveJob.resumed ? 'Imagen enviada tras reanudar la subida.' : 'Imagen enviada.');
 }
@@ -1118,7 +1218,7 @@ async function flushQueues() {
       updateQueueSize();
     } catch (error) {
       console.error(error);
-      setComposerHint('No se pudo enviar la cola. Revisa las politicas de Supabase.');
+      setComposerHint('No se pudo enviar la cola. Revisa las políticas de Supabase.');
       break;
     }
   }
@@ -1215,6 +1315,20 @@ async function updateMessageRemote(localId, patch) {
   if (rows[0]) {
     const hydrated = await hydrateIncomingMessage(rows[0]);
     upsertMessage(hydrated);
+  }
+}
+
+async function deleteMessageRemote(localId) {
+  const url = `${state.config.supabaseUrl}/rest/v1/messages?local_id=eq.${encodeURIComponent(localId)}&session_id=eq.${encodeURIComponent(state.config.sessionId)}`;
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      ...supabaseHeaders(),
+      Prefer: 'return=representation'
+    }
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
   }
 }
 
@@ -1449,7 +1563,7 @@ function selectConnectionMode() {
 function updateConnectionUi() {
   elements.connectionMode.textContent = state.mode;
   elements.netFabMode.textContent = state.mode;
-  elements.connectionSpeed.textContent = state.kbps ? `${state.kbps} kbps` : state.online ? 'Midiendo' : 'Offline';
+  elements.connectionSpeed.textContent = state.kbps ? `${state.kbps} kbps` : state.online ? 'Midiendo' : 'Sin conexión';
   elements.connectionLatency.textContent = state.latency ? `${state.latency} ms` : '-';
   elements.connectionStability.textContent = `${Math.round(state.stability * 100)}%`;
   elements.connectionLoss.textContent = `${Math.round(state.loss * 100)}%`;
@@ -1573,7 +1687,7 @@ async function exportHistory() {
   const transcript = buildTranscript();
   if (!state.online) {
     downloadTextFile(transcript, `${state.config.sessionId}-historial.txt`, 'text/plain');
-    setComposerHint('Sin conexion. Se descargo el historial en TXT local.');
+    setComposerHint('Sin conexión. Se descargó el historial en TXT local.');
     return;
   }
   const url = `${state.config.supabaseUrl}/functions/v1/${state.config.exportEndpoint}`;
@@ -1591,11 +1705,11 @@ async function exportHistory() {
     if (!response.ok) {
       throw new Error(await response.text());
     }
-    setComposerHint('Solicitud de exportacion enviada a la funcion exportHistory.');
+    setComposerHint('Solicitud de exportación enviada a la función exportHistory.');
   } catch (error) {
     console.error(error);
     downloadTextFile(transcript, `${state.config.sessionId}-historial.txt`, 'text/plain');
-    setComposerHint('La funcion exportHistory no respondio. Se descargo el TXT local como respaldo.');
+    setComposerHint('La función exportHistory no respondió. Se descargó el TXT local como respaldo.');
   }
 }
 
@@ -1628,10 +1742,10 @@ async function ensureE2EEUnlocked(interactive) {
     return false;
   }
 
-  const promptText = 'Clave E2E (solo se pedira una vez al dia):';
+  const promptText = 'Clave E2E (solo se pedirá una vez al día):';
   const typed = window.prompt(promptText, '');
   if (typed === null) {
-    setComposerHint('Cifrado bloqueado. Puedes seguir leyendo, pero mensajes cifrados quedaran ocultos.');
+    setComposerHint('Cifrado bloqueado. Puedes seguir leyendo, pero mensajes cifrados quedarán ocultos.');
     return false;
   }
   if (typed.trim() !== String(state.config.e2eePassphrase || '').trim()) {
@@ -1641,7 +1755,7 @@ async function ensureE2EEUnlocked(interactive) {
 
   state.e2eeUnlockUntil = Date.now() + DAILY_UNLOCK_MS;
   saveJson(STORAGE_KEYS.e2eeUnlockUntil, state.e2eeUnlockUntil);
-  setComposerHint('Clave aceptada. No se volvera a pedir hoy.');
+  setComposerHint('Clave aceptada. No se volverá a pedir hoy.');
   return true;
 }
 
@@ -1771,7 +1885,7 @@ function downloadTextFile(content, fileName, type) {
 function buildSetupRequirements() {
   const sessionId = state.config.sessionId || 'sala-principal';
   return [
-    'Proyecto detectado por la anon key:',
+    'Proyecto detectado por la clave anónima:',
     'ref: kxhgjamftlniaspagfjo',
     'URL esperada: https://kxhgjamftlniaspagfjo.supabase.co',
     '',
@@ -1797,30 +1911,30 @@ function buildSetupRequirements() {
     'create index if not exists messages_session_time_idx on public.messages (session_id, timestamp);',
     'create unique index if not exists messages_session_local_idx on public.messages (session_id, local_id);',
     '',
-    '2. Bucket publico chat-files',
+    '2. Bucket público chat-files',
     '',
     'insert into storage.buckets (id, name, public)',
     "values ('chat-files', 'chat-files', true)",
     'on conflict (id) do update set public = true;',
     '',
-    '3. Politicas minimas para cliente anon',
+    '3. Políticas mínimas para cliente anónimo',
     '',
     'Necesitas permitir select, insert y update sobre public.messages.',
     'Necesitas permitir insert y select sobre storage.objects del bucket chat-files.',
-    'Si quieres restringir por sala, usa session_id y sender en tus politicas RLS.',
+    'Si quieres restringir por sala, usa session_id y sender en tus políticas RLS.',
     '',
     '4. Edge Function exportHistory',
     '',
     'Debe recibir sender o user id, session_id, email y transcript.',
-    'Debe leer public.messages, descargar manifiestos e imagenes del bucket, generar TXT y ZIP, y enviar correo.',
+    'Debe leer public.messages, descargar manifiestos e imágenes del bucket, generar TXT y ZIP, y enviar correo.',
     '',
     '5. Realtime',
     '',
     `La app escucha cambios de la sala ${sessionId} en public.messages.`,
     '',
-    '6. Nota tecnica',
+    '6. Nota técnica',
     '',
-    'La app usa subida por bloques de 5 KB hacia Storage y guarda un manifiesto JSON para reanudar y reconstruir imagenes con verificacion SHA-256.'
+    'La app usa subida por bloques de 5 KB hacia Storage y guarda un manifiesto JSON para reanudar y reconstruir imágenes con verificación SHA-256.'
   ].join('\n');
 }
 
