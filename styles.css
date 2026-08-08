@@ -562,6 +562,111 @@ textarea:focus {
   gap: 8px;
 }
 
+.emoji-panel {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #1a2030 0%, #151b26 100%);
+  box-shadow: var(--shadow-sm);
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+
+.emoji-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.emoji-panel-header strong {
+  font-size: 0.9rem;
+}
+
+.emoji-categories {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.emoji-category {
+  border: 1px solid var(--line);
+  background: var(--soft);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.emoji-category.active,
+.emoji-category:focus-visible,
+.emoji-category:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+  background: rgba(76, 194, 255, 0.14);
+  outline: none;
+}
+
+.emoji-recent-row {
+  display: grid;
+  gap: 8px;
+}
+
+.emoji-recent-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.emoji-grid-recent {
+  max-height: none;
+}
+
+.emoji-panel-close {
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(42px, 1fr));
+  gap: 8px;
+  max-height: 180px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.emoji-key {
+  border: 1px solid var(--line);
+  background: var(--soft);
+  color: var(--fg);
+  border-radius: 10px;
+  min-height: 42px;
+  font-size: 1.05rem;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.emoji-key:hover,
+.emoji-key:focus-visible {
+  border-color: var(--accent);
+  background: rgba(76, 194, 255, 0.14);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.emoji-panel[hidden] {
+  display: none !important;
+}
+
 .composer-fixed .composer-form {
   margin: 0;
 }
@@ -596,6 +701,16 @@ pre {
 
   .composer-fixed {
     bottom: 8px;
+  }
+
+  .emoji-grid {
+    grid-template-columns: repeat(auto-fit, minmax(38px, 1fr));
+    max-height: 160px;
+  }
+
+  .emoji-key {
+    min-height: 38px;
+    font-size: 1rem;
   }
 
   .profile-floating {

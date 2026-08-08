@@ -12,7 +12,7 @@
   <title>Chat Privado Ligero</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <main class="app">
@@ -189,8 +189,21 @@
     <section class="composer composer-fixed">
       <form id="message-form" class="composer-form">
         <textarea id="message-input" rows="2" maxlength="2000" placeholder="Escribe un mensaje" spellcheck="true" autocapitalize="sentences" autocomplete="on" lang="es"></textarea>
+        <section id="emoji-panel" class="emoji-panel" hidden aria-label="Teclado de emojis">
+          <div class="emoji-panel-header">
+            <strong>Emojis</strong>
+            <button id="emoji-panel-close" class="button ghost emoji-panel-close" type="button" aria-label="Ocultar teclado">✕</button>
+          </div>
+          <div id="emoji-categories" class="emoji-categories" role="tablist" aria-label="Categorías de emojis"></div>
+          <div class="emoji-recent-row">
+            <span class="emoji-recent-label">Recientes</span>
+            <div id="emoji-recent-grid" class="emoji-grid emoji-grid-recent"></div>
+          </div>
+          <div id="emoji-grid" class="emoji-grid"></div>
+        </section>
         <div class="composer-actions">
           <label class="button ghost file-button button-icon" for="image-input"><span class="icon">＋</span><span>Imagen</span></label>
+          <button id="emoji-toggle" class="button ghost button-icon" type="button" aria-expanded="false" aria-controls="emoji-panel"><span class="icon">☺</span><span>Emoji</span></button>
           <button id="send-button" class="button button-icon" type="submit"><span class="icon">➤</span><span>Enviar</span></button>
         </div>
       </form>
@@ -210,6 +223,6 @@
     </article>
   </template>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

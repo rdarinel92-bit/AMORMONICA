@@ -9,9 +9,10 @@ const STORAGE_KEYS = {
   forceImages: 'chat-lite-force-images',
   e2eeUnlockUntil: 'chat-lite-e2ee-unlock-until',
   profilePhoto: 'chat-lite-profile-photo',
-  appVersion: 'chat-lite-app-version'
+  appVersion: 'chat-lite-app-version',
+  emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v5';
+const APP_VERSION = '2026-08-08-v7';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -84,7 +85,38 @@ const state = {
   pendingUploadsCount: 0,
   initialized: false,
   imageDraft: null,
-  imageDraftFile: null
+  imageDraftFile: null,
+  emojiPanelOpen: false,
+  emojiPanelManuallyClosed: false,
+  emojiCategory: 'recientes',
+  emojiRecent: loadJson(STORAGE_KEYS.emojiRecent, [])
+};
+
+const EMOJI_CATEGORIES = {
+  recientes: {
+    label: 'Recientes',
+    emojis: () => state.emojiRecent.length > 0 ? state.emojiRecent : ['😀', '👍', '❤️']
+  },
+  caras: {
+    label: 'Caras',
+    emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '🙂', '😉', '😍', '😘', '😎', '🤔', '😴', '🤯', '😭']
+  },
+  manos: {
+    label: 'Manos',
+    emojis: ['👍', '👎', '👌', '🤝', '👏', '🙏', '💪', '🫶', '✋', '👋', '🤟', '🖐️', '🤘', '👉', '👈']
+  },
+  objetos: {
+    label: 'Objetos',
+    emojis: ['💬', '📷', '⚙️', '🛠️', '🔧', '🧰', '💡', '🔋', '📌', '📝', '🧠', '💻', '📦', '🔒', '🔔']
+  },
+  viajes: {
+    label: 'Viajes',
+    emojis: ['🚗', '🏍️', '🛻', '🚌', '🚚', '🚀', '🛣️', '⛽', '🧭', '🗺️', '🛞', '🛠️', '🏁', '📍', '🚦']
+  },
+  clima: {
+    label: 'Clima',
+    emojis: ['☀️', '⛅', '🌤️', '🌧️', '⛈️', '🌪️', '❄️', '🔥', '🌙', '⭐', '✨', '💧', '🌈', '🌫️']
+  }
 };
 
 const elements = {
@@ -148,7 +180,13 @@ const elements = {
   profileAvatarImg: document.getElementById('profile-avatar-img'),
   profileAvatarFallback: document.getElementById('profile-avatar-fallback'),
   profileAvatarImgTopbar: document.getElementById('profile-avatar-img-topbar'),
-  profileAvatarFallbackTopbar: document.getElementById('profile-avatar-fallback-topbar')
+  profileAvatarFallbackTopbar: document.getElementById('profile-avatar-fallback-topbar'),
+  emojiPanel: document.getElementById('emoji-panel'),
+  emojiCategories: document.getElementById('emoji-categories'),
+  emojiRecentGrid: document.getElementById('emoji-recent-grid'),
+  emojiGrid: document.getElementById('emoji-grid'),
+  emojiToggle: document.getElementById('emoji-toggle'),
+  emojiPanelClose: document.getElementById('emoji-panel-close')
 };
 
 boot().catch((error) => {
@@ -159,6 +197,7 @@ boot().catch((error) => {
 async function boot() {
   bindUi();
   await enforceAppVersion();
+  renderEmojiPanel();
   loadProfilePhoto();
   registerPwa();
   applyConfigToForm();
@@ -317,6 +356,9 @@ function bindUi() {
     if (!target.closest('.message')) {
       clearSelectedMessage();
     }
+    if (state.emojiPanelOpen && !isEmojiPanelTarget(target)) {
+      hideEmojiPanel();
+    }
     if (elements.netPanel.hidden) {
       return;
     }
@@ -390,6 +432,7 @@ function bindUi() {
     try {
       await enqueueTextMessage(text);
       elements.messageInput.value = '';
+      hideEmojiPanel();
     } catch (error) {
       console.error(error);
       setComposerHint('No se pudo enviar: clave E2E pendiente o inválida.');
@@ -398,9 +441,30 @@ function bindUi() {
 
   elements.messageInput.addEventListener('input', () => {
     applyTypingCorrections(elements.messageInput);
+    if (!state.emojiPanelOpen && !state.emojiPanelManuallyClosed) {
+      showEmojiPanel();
+    }
+  });
+
+  elements.messageInput.addEventListener('focus', () => {
+    if (!state.emojiPanelManuallyClosed) {
+      showEmojiPanel();
+    }
+  });
+
+  elements.messageInput.addEventListener('blur', () => {
+    window.setTimeout(() => {
+      if (!isEmojiPanelTarget(document.activeElement)) {
+        hideEmojiPanel();
+      }
+    }, 0);
   });
 
   elements.messageInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      hideEmojiPanel();
+      return;
+    }
     if (event.key === 'ArrowUp' && !elements.messageInput.value.trim()) {
       event.preventDefault();
       editLastOwnTextMessage().catch((error) => {
@@ -450,6 +514,61 @@ function bindUi() {
     setComposerHint('Borrador de imagen descartado.');
   });
 
+  if (elements.emojiToggle) {
+    elements.emojiToggle.addEventListener('click', () => {
+      const wasOpen = state.emojiPanelOpen;
+      if (wasOpen) {
+        state.emojiPanelManuallyClosed = true;
+        hideEmojiPanel();
+      } else {
+        state.emojiPanelManuallyClosed = false;
+        showEmojiPanel();
+      }
+      if (!wasOpen) {
+        elements.messageInput.focus({ preventScroll: true });
+      }
+    });
+  }
+
+  if (elements.emojiPanelClose) {
+    elements.emojiPanelClose.addEventListener('click', () => {
+      state.emojiPanelManuallyClosed = true;
+      hideEmojiPanel();
+      elements.messageInput.focus({ preventScroll: true });
+    });
+  }
+
+  if (elements.emojiGrid) {
+    elements.emojiGrid.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLButtonElement)) {
+        return;
+      }
+      const emoji = target.dataset.emoji;
+      if (!emoji) {
+        return;
+      }
+      insertTextAtCursor(elements.messageInput, emoji);
+      elements.messageInput.focus({ preventScroll: true });
+      showEmojiPanel();
+    });
+  }
+
+  if (elements.emojiCategories) {
+    elements.emojiCategories.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLButtonElement)) {
+        return;
+      }
+      const category = target.dataset.category;
+      if (!category) {
+        return;
+      }
+      setEmojiCategory(category);
+      showEmojiPanel();
+    });
+  }
+
   elements.profilePhotoInput.addEventListener('change', async (event) => {
     const file = event.target.files && event.target.files[0];
     event.target.value = '';
@@ -457,6 +576,10 @@ function bindUi() {
       return;
     }
     await saveProfilePhoto(file);
+  });
+
+  elements.emojiPanel?.addEventListener('pointerdown', (event) => {
+    event.stopPropagation();
   });
 
   elements.exportHistory.addEventListener('click', async () => {
@@ -692,6 +815,140 @@ function isConfigured() {
 
 function setComposerHint(text) {
   elements.composerHint.textContent = text;
+}
+
+function renderEmojiPanel() {
+  renderEmojiCategories();
+  renderEmojiRecent();
+  renderEmojiCategoryGrid();
+}
+
+function renderEmojiCategories() {
+  if (!elements.emojiCategories) {
+    return;
+  }
+
+  elements.emojiCategories.innerHTML = '';
+  for (const [categoryKey, category] of Object.entries(EMOJI_CATEGORIES)) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `emoji-category${state.emojiCategory === categoryKey ? ' active' : ''}`;
+    button.dataset.category = categoryKey;
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', String(state.emojiCategory === categoryKey));
+    button.textContent = category.label;
+    elements.emojiCategories.appendChild(button);
+  }
+}
+
+function renderEmojiRecent() {
+  if (!elements.emojiRecentGrid) {
+    return;
+  }
+
+  elements.emojiRecentGrid.innerHTML = '';
+  const recent = state.emojiRecent.slice(0, 8);
+  for (const emoji of recent) {
+    elements.emojiRecentGrid.appendChild(createEmojiKeyButton(emoji));
+  }
+}
+
+function renderEmojiCategoryGrid() {
+  if (!elements.emojiGrid) {
+    return;
+  }
+
+  const category = EMOJI_CATEGORIES[state.emojiCategory] || EMOJI_CATEGORIES.caras;
+  const emojis = typeof category.emojis === 'function' ? category.emojis() : category.emojis;
+  elements.emojiGrid.innerHTML = '';
+  for (const emoji of emojis) {
+    elements.emojiGrid.appendChild(createEmojiKeyButton(emoji));
+  }
+}
+
+function createEmojiKeyButton(emoji) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'emoji-key';
+  button.dataset.emoji = emoji;
+  button.setAttribute('aria-label', `Insertar ${emoji}`);
+  button.textContent = emoji;
+  return button;
+}
+
+function insertTextAtCursor(target, text) {
+  if (!target) {
+    return;
+  }
+
+  const start = target.selectionStart ?? target.value.length;
+  const end = target.selectionEnd ?? target.value.length;
+  const before = target.value.slice(0, start);
+  const after = target.value.slice(end);
+  target.value = `${before}${text}${after}`;
+
+  const nextCursor = start + text.length;
+  target.setSelectionRange(nextCursor, nextCursor);
+  applyTypingCorrections(target);
+  registerRecentEmoji(text);
+  renderEmojiRecent();
+  renderEmojiCategories();
+  renderEmojiCategoryGrid();
+}
+
+function registerRecentEmoji(emoji) {
+  if (!emoji) {
+    return;
+  }
+
+  state.emojiRecent = [emoji, ...state.emojiRecent.filter((item) => item !== emoji)].slice(0, 12);
+  saveJson(STORAGE_KEYS.emojiRecent, state.emojiRecent);
+}
+
+function setEmojiCategory(categoryKey) {
+  if (!EMOJI_CATEGORIES[categoryKey]) {
+    return;
+  }
+
+  state.emojiCategory = categoryKey;
+  renderEmojiCategories();
+  renderEmojiCategoryGrid();
+}
+
+function isEmojiPanelTarget(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  return Boolean(target.closest('.composer') || target.closest('#emoji-panel'));
+}
+
+function showEmojiPanel() {
+  if (!elements.emojiPanel) {
+    return;
+  }
+  state.emojiPanelOpen = true;
+  elements.emojiPanel.hidden = false;
+  elements.emojiToggle?.setAttribute('aria-expanded', 'true');
+  renderEmojiCategories();
+  renderEmojiRecent();
+  renderEmojiCategoryGrid();
+}
+
+function hideEmojiPanel() {
+  if (!elements.emojiPanel) {
+    return;
+  }
+  state.emojiPanelOpen = false;
+  elements.emojiPanel.hidden = true;
+  elements.emojiToggle?.setAttribute('aria-expanded', 'false');
+}
+
+function toggleEmojiPanel() {
+  if (state.emojiPanelOpen) {
+    hideEmojiPanel();
+    return;
+  }
+  showEmojiPanel();
 }
 
 function loadJson(key, fallback) {
