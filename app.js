@@ -14,7 +14,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v12';
+const APP_VERSION = '2026-08-08-v13';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -50,6 +50,7 @@ const defaultConfig = {
   senderId: '',
   bucketName: 'chat-files',
   exportEndpoint: 'exportHistory',
+  resetEndpoint: 'resetRoomAdmin',
   exportEmail: '',
   e2eePassphrase: ''
 };
@@ -155,6 +156,7 @@ const elements = {
   senderId: document.getElementById('sender-id'),
   bucketName: document.getElementById('bucket-name'),
   exportEndpoint: document.getElementById('export-endpoint'),
+  resetEndpoint: document.getElementById('reset-endpoint'),
   exportEmail: document.getElementById('export-email'),
   reloadHistory: document.getElementById('reload-history'),
   resetRoom: document.getElementById('reset-room'),
@@ -415,6 +417,7 @@ function bindUi() {
       senderId: elements.senderId.value.trim() || createId('user'),
       bucketName: elements.bucketName.value.trim() || defaultConfig.bucketName,
       exportEndpoint: elements.exportEndpoint.value.trim() || defaultConfig.exportEndpoint,
+      resetEndpoint: elements.resetEndpoint.value.trim() || defaultConfig.resetEndpoint,
       exportEmail: elements.exportEmail.value.trim(),
       e2eePassphrase: nextPassphrase
     };
@@ -739,6 +742,9 @@ function applyConfigToForm() {
   elements.senderId.value = state.config.senderId;
   elements.bucketName.value = state.config.bucketName;
   elements.exportEndpoint.value = state.config.exportEndpoint;
+  if (elements.resetEndpoint) {
+    elements.resetEndpoint.value = state.config.resetEndpoint || defaultConfig.resetEndpoint;
+  }
   elements.exportEmail.value = state.config.exportEmail;
   if (elements.forceImages) {
     elements.forceImages.checked = state.forceImages;
@@ -883,6 +889,7 @@ function applyConfigLockUi() {
     elements.senderId,
     elements.bucketName,
     elements.exportEndpoint,
+    elements.resetEndpoint,
     elements.exportEmail,
     elements.saveConfig
   ];
@@ -2354,31 +2361,67 @@ async function resetCurrentRoomForAll() {
 
   setComposerLocked(true);
   try {
-    setComposerHint('Borrando historial e imágenes de la sala...');
-    const remoteMessages = await fetchMessagesRemote();
-    for (const message of remoteMessages) {
-      if (message && message.type === 'image' && message.content) {
-        try {
-          await deleteOwnImageAssets(message);
-        } catch (error) {
-          console.error(error);
-        }
+    const secureEndpoint = String(state.config.resetEndpoint || '').trim();
+    let usedSecureFunction = false;
+
+    if (secureEndpoint) {
+      try {
+        setComposerHint(`Solicitando reinicio seguro vía función ${secureEndpoint}...`);
+        await resetRoomViaFunction(secureEndpoint);
+        usedSecureFunction = true;
+      } catch (secureError) {
+        console.error(secureError);
+        setComposerHint('La función segura falló. Intentando borrado directo por REST...');
       }
     }
 
-    const deleted = await deleteMessagesByCurrentSessionRemote();
-    if (remoteMessages.length > 0 && deleted === 0) {
-      throw new Error('DELETE ejecutado pero no eliminó filas. RLS probablemente bloquea la operación.');
+    if (!usedSecureFunction) {
+      setComposerHint('Borrando historial e imágenes de la sala...');
+      const remoteMessages = await fetchMessagesRemote();
+      for (const message of remoteMessages) {
+        if (message && message.type === 'image' && message.content) {
+          try {
+            await deleteOwnImageAssets(message);
+          } catch (error) {
+            console.error(error);
+          }
+        }
+      }
+
+      const deleted = await deleteMessagesByCurrentSessionRemote();
+      if (remoteMessages.length > 0 && deleted === 0) {
+        throw new Error('DELETE ejecutado pero no eliminó filas. RLS probablemente bloquea la operación.');
+      }
     }
+
     await clearCurrentRoomLocalState();
     await refreshHistory({ silent: true });
-    setComposerHint('Sala reiniciada para todos.');
+    setComposerHint(usedSecureFunction
+      ? 'Sala reiniciada para todos (modo seguro por función).'
+      : 'Sala reiniciada para todos (modo directo REST).');
   } catch (error) {
     console.error(error);
     const detail = formatSupabaseError(error);
     setComposerHint(`No se pudo reiniciar la sala: ${detail}`);
   } finally {
     setComposerLocked(false);
+  }
+}
+
+async function resetRoomViaFunction(endpointName) {
+  const url = `${state.config.supabaseUrl}/functions/v1/${endpointName}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: supabaseHeaders(),
+    body: JSON.stringify({
+      sender: state.config.senderId,
+      session_id: state.config.sessionId,
+      action: 'reset_room'
+    })
+  });
+  if (!response.ok) {
+    const raw = await response.text();
+    throw new Error(`Función ${endpointName} devolvió HTTP ${response.status}: ${raw}`);
   }
 }
 
@@ -3173,29 +3216,29 @@ function buildSetupRequirements() {
     "values ('chat-files', 'chat-files', true)",
     'on conflict (id) do update set public = true;',
     '',
-    '3. Políticas mínimas para cliente anónimo',
+    '3. Políticas para cliente anónimo',
     '',
-    'Necesitas permitir select, insert, update y delete sobre public.messages.',
-    'Necesitas permitir insert, select y delete sobre storage.objects del bucket chat-files.',
+    'Necesitas permitir select, insert y update sobre public.messages.',
+    'Necesitas permitir insert y select sobre storage.objects del bucket chat-files.',
+    'Recomendado: NO permitir delete directo al rol anon.',
     'Si quieres restringir por sala, usa session_id y sender en tus políticas RLS.',
     '',
-    'Ejemplo rápido para que el botón "Reiniciar sala (todos)" funcione:',
+    '4. Reinicio seguro recomendado (sin abrir DELETE al anon)',
     '',
-    'create policy if not exists "messages delete anon" on public.messages for delete to anon using (true);',
-    'create policy if not exists "storage delete anon" on storage.objects for delete to anon using (bucket_id = \'chat-files\');',
+    'Configura una Edge Function resetRoomAdmin con Service Role que valide sender == roberto',
+    'y solo entonces elimine mensajes + objetos del bucket para la session_id solicitada.',
+    'En la app, define ese nombre en el campo "Función resetRoomAdmin".',
     '',
-    'Nota: el ejemplo anterior abre borrado total para el rol anon; úsalo solo en entornos de confianza.',
-    '',
-    '4. Edge Function exportHistory',
+    '5. Edge Function exportHistory',
     '',
     'Debe recibir sender o user id, session_id, email y transcript.',
     'Debe leer public.messages, descargar manifiestos e imágenes del bucket, generar TXT y ZIP, y enviar correo.',
     '',
-    '5. Realtime',
+    '6. Realtime',
     '',
     `La app escucha cambios de la sala ${sessionId} en public.messages.`,
     '',
-    '6. Nota técnica',
+    '7. Nota técnica',
     '',
     'La app usa subida por bloques de 5 KB hacia Storage y guarda un manifiesto JSON para reanudar y reconstruir imágenes con verificación SHA-256.'
   ].join('\n');
