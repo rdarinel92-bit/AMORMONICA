@@ -35,6 +35,15 @@
 
     <button id="net-fab" class="net-fab" type="button" aria-controls="net-panel" aria-expanded="false">Red: <span id="net-fab-mode">--</span></button>
     <section id="net-panel" class="net-panel" aria-label="Estado de conexion" hidden>
+      <div class="net-summary">
+        <div><span class="label">Usuario</span><strong id="net-user">-</strong></div>
+        <div><span class="label">Sala</span><strong id="net-room">-</strong></div>
+        <div><span class="label">Ultima sync</span><strong id="net-last-sync">-</strong></div>
+        <div><span class="label">Pendientes</span><strong id="net-pending">0</strong></div>
+      </div>
+      <div class="setup-actions net-actions">
+        <button id="sync-now" class="button" type="button">Sincronizar ahora</button>
+      </div>
       <div class="status-grid compact">
         <div class="status-card">
           <span class="label">Modo</span>

@@ -60,6 +60,7 @@ const state = {
   imageRetryTimers: new Map(),
   e2eeKeyPromise: null,
   e2eeKeyFingerprint: '',
+  lastSyncAt: null,
   initialized: false
 };
 
@@ -67,6 +68,11 @@ const elements = {
   netFab: document.getElementById('net-fab'),
   netFabMode: document.getElementById('net-fab-mode'),
   netPanel: document.getElementById('net-panel'),
+  syncNow: document.getElementById('sync-now'),
+  netUser: document.getElementById('net-user'),
+  netRoom: document.getElementById('net-room'),
+  netLastSync: document.getElementById('net-last-sync'),
+  netPending: document.getElementById('net-pending'),
   activeUser: document.getElementById('active-user'),
   identityGate: document.getElementById('identity-gate'),
   identityRoberto: document.getElementById('identity-roberto'),
@@ -141,6 +147,15 @@ function bindUi() {
 
   elements.netPanel.addEventListener('click', (event) => {
     event.stopPropagation();
+  });
+
+  elements.syncNow.addEventListener('click', async () => {
+    setComposerHint('Sincronizando ahora...');
+    await probeConnection();
+    await refreshHistory({ silent: true });
+    await flushQueues();
+    updateSyncSummary();
+    setComposerHint('Sincronizacion manual completada.');
   });
 
   document.addEventListener('click', (event) => {
@@ -244,6 +259,7 @@ function bindUi() {
     state.online = true;
     probeConnection().then(flushQueues);
     refreshHistory({ silent: true });
+    updateSyncSummary();
   });
 
   window.addEventListener('offline', () => {
@@ -254,12 +270,14 @@ function bindUi() {
   window.addEventListener('focus', () => {
     if (state.online && isConfigured()) {
       refreshHistory({ silent: true });
+      updateSyncSummary();
     }
   });
 
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && state.online && isConfigured()) {
       refreshHistory({ silent: true });
+      updateSyncSummary();
     }
   });
 }
@@ -349,6 +367,7 @@ function formatUserName(value) {
 
 function updateActiveUserUi() {
   elements.activeUser.textContent = formatUserName(state.config.senderId || state.identity);
+  updateSyncSummary();
 }
 
 function setComposerLocked(locked) {
@@ -886,6 +905,8 @@ async function refreshHistory(options = {}) {
       syncMessageReceipt(message);
     }
     persistKnownRemoteIds();
+    state.lastSyncAt = new Date().toISOString();
+    updateSyncSummary();
     if (!silent) {
       setComposerHint('Historial cargado.');
     }
@@ -1113,7 +1134,7 @@ function startConnectionMonitoring() {
       flushQueues();
       refreshHistory({ silent: true });
     }
-  }, 20000);
+  }, document.hidden || state.mode === 'Ultra-ligero' ? 30000 : 20000);
 }
 
 async function probeConnection() {
@@ -1159,6 +1180,9 @@ async function probeConnection() {
   state.stability = state.probeSamples.length ? okSamples.length / state.probeSamples.length : 0;
   state.loss = state.probeSamples.length ? failedSamples / state.probeSamples.length : 0;
   state.mode = selectConnectionMode();
+  if (sample.ok) {
+    state.lastSyncAt = new Date().toISOString();
+  }
   updateConnectionUi();
 }
 
@@ -1166,10 +1190,10 @@ function selectConnectionMode() {
   if (!isConfigured()) {
     return 'Sin configurar';
   }
-  if (!state.online || state.kbps < 150 || state.latency > 1400 || state.stability < 0.7 || state.loss > 0.25) {
+  if (!state.online || state.kbps < 80 || state.latency > 2000 || state.stability < 0.6 || state.loss > 0.35) {
     return 'Ultra-ligero';
   }
-  if (state.kbps < 800 || state.latency > 500 || state.stability < 0.9 || state.loss > 0.1) {
+  if (state.kbps < 400 || state.latency > 900 || state.stability < 0.85 || state.loss > 0.15) {
     return 'Inteligente';
   }
   return 'Turbo';
@@ -1182,6 +1206,7 @@ function updateConnectionUi() {
   elements.connectionLatency.textContent = state.latency ? `${state.latency} ms` : '-';
   elements.connectionStability.textContent = `${Math.round(state.stability * 100)}%`;
   elements.connectionLoss.textContent = `${Math.round(state.loss * 100)}%`;
+  updateSyncSummary();
   updateQueueSize();
 }
 
@@ -1209,27 +1234,36 @@ async function restoreUploadJobs() {
 function updateQueueSize() {
   dbGetAll(UPLOAD_STORE).then((jobs) => {
     elements.queueSize.textContent = String(state.queuedTexts.length + jobs.length);
+    updateSyncSummary();
   }).catch(() => {
     elements.queueSize.textContent = String(state.queuedTexts.length);
+    updateSyncSummary();
   });
+}
+
+function updateSyncSummary() {
+  elements.netUser.textContent = formatUserName(state.config.senderId || state.identity);
+  elements.netRoom.textContent = state.config.sessionId || '-';
+  elements.netLastSync.textContent = state.lastSyncAt ? formatDate(state.lastSyncAt) : 'nunca';
+  elements.netPending.textContent = String(state.queuedTexts.length + (state.db ? 0 : 0));
 }
 
 function getTargetImageKb() {
   if (state.mode === 'Ultra-ligero') {
-    return 50;
+    return 30;
   }
   if (state.mode === 'Inteligente') {
-    return 80;
+    return 50;
   }
   return 150;
 }
 
 function getMaxDimensionForMode() {
   if (state.mode === 'Ultra-ligero') {
-    return 960;
+    return 560;
   }
   if (state.mode === 'Inteligente') {
-    return 1280;
+    return 800;
   }
   return 1600;
 }
@@ -1250,16 +1284,16 @@ async function compressImage(file, targetKb, maxDimension) {
 
   let quality = 0.82;
   let blob = await canvasToJpeg(canvas, quality);
-  while (blob.size > targetKb * 1024 && quality > 0.28) {
-    quality -= 0.08;
+  while (blob.size > targetKb * 1024 && quality > 0.16) {
+    quality -= 0.1;
     blob = await canvasToJpeg(canvas, quality);
   }
 
-  while (blob.size > targetKb * 1024 && Math.max(canvas.width, canvas.height) > 320) {
-    canvas.width = Math.max(320, Math.round(canvas.width * 0.85));
-    canvas.height = Math.max(320, Math.round(canvas.height * 0.85));
+  while (blob.size > targetKb * 1024 && Math.max(canvas.width, canvas.height) > 220) {
+    canvas.width = Math.max(220, Math.round(canvas.width * 0.78));
+    canvas.height = Math.max(220, Math.round(canvas.height * 0.78));
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    quality = Math.max(0.22, quality - 0.06);
+    quality = Math.max(0.14, quality - 0.08);
     blob = await canvasToJpeg(canvas, quality);
   }
 
