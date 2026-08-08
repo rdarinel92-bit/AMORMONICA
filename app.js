@@ -282,13 +282,13 @@ function ensureIdentitySelected() {
       saveJson(STORAGE_KEYS.config, state.config);
       elements.senderId.value = state.config.senderId;
       elements.identityCustom.value = previous;
-      elements.identityGate.hidden = true;
+      setIdentityGateVisible(false);
       updateActiveUserUi();
       resolve();
       return;
     }
 
-    elements.identityGate.hidden = false;
+    setIdentityGateVisible(true);
 
     const choose = (rawName) => {
       const name = normalizeIdentity(rawName);
@@ -302,7 +302,7 @@ function ensureIdentitySelected() {
       saveJson(STORAGE_KEYS.identity, state.identity);
       saveJson(STORAGE_KEYS.config, state.config);
       elements.senderId.value = state.config.senderId;
-      elements.identityGate.hidden = true;
+      setIdentityGateVisible(false);
       updateActiveUserUi();
       setComposerHint(`Entraste como ${formatUserName(state.config.senderId)}.`);
       resolve();
@@ -318,6 +318,11 @@ function ensureIdentitySelected() {
       }
     };
   });
+}
+
+function setIdentityGateVisible(visible) {
+  elements.identityGate.hidden = !visible;
+  elements.identityGate.style.display = visible ? 'grid' : 'none';
 }
 
 function normalizeIdentity(value) {

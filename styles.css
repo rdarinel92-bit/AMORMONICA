@@ -52,6 +52,10 @@ button {
   z-index: 20;
 }
 
+.identity-gate[hidden] {
+  display: none !important;
+}
+
 .identity-card {
   width: min(560px, 100%);
   border: 1px solid var(--line);
