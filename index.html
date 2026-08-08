@@ -3,13 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <meta name="theme-color" content="#ffffff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Chat Privado Ligero</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
   <main class="app">
@@ -19,6 +22,10 @@
         <strong id="active-user">cargando...</strong>
       </div>
       <div class="topbar-actions">
+        <label class="profile-avatar topbar-avatar-fallback" for="profile-photo-input" aria-label="Cargar foto de perfil">
+          <img id="profile-avatar-img-topbar" src="" alt="">
+          <span id="profile-avatar-fallback-topbar" class="profile-avatar-fallback">U</span>
+        </label>
         <button id="install-app" type="button" class="button ghost" hidden aria-hidden="true">Instalar</button>
         <button id="toggle-setup" type="button" class="button ghost" aria-hidden="false">Config</button>
       </div>
@@ -203,6 +210,6 @@
     </article>
   </template>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

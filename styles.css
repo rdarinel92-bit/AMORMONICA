@@ -128,6 +128,16 @@ button {
   justify-content: flex-end;
 }
 
+.topbar-avatar-fallback {
+  width: 34px;
+  height: 34px;
+  border-width: 1px;
+}
+
+.topbar-avatar-fallback .profile-camera-icon {
+  display: none;
+}
+
 .profile-floating {
   position: fixed;
   top: 10px;
@@ -599,6 +609,11 @@ pre {
 
   .profile-camera-icon {
     font-size: 12px;
+  }
+
+  .topbar-avatar-fallback {
+    width: 32px;
+    height: 32px;
   }
 }
 

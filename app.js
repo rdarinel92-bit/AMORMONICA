@@ -8,8 +8,10 @@ const STORAGE_KEYS = {
   autoSavedImages: 'chat-lite-auto-saved-images',
   forceImages: 'chat-lite-force-images',
   e2eeUnlockUntil: 'chat-lite-e2ee-unlock-until',
-  profilePhoto: 'chat-lite-profile-photo'
+  profilePhoto: 'chat-lite-profile-photo',
+  appVersion: 'chat-lite-app-version'
 };
+const APP_VERSION = '2026-08-08-v5';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -144,7 +146,9 @@ const elements = {
   draftDiscardButton: document.getElementById('draft-discard'),
   profilePhotoInput: document.getElementById('profile-photo-input'),
   profileAvatarImg: document.getElementById('profile-avatar-img'),
-  profileAvatarFallback: document.getElementById('profile-avatar-fallback')
+  profileAvatarFallback: document.getElementById('profile-avatar-fallback'),
+  profileAvatarImgTopbar: document.getElementById('profile-avatar-img-topbar'),
+  profileAvatarFallbackTopbar: document.getElementById('profile-avatar-fallback-topbar')
 };
 
 boot().catch((error) => {
@@ -154,6 +158,7 @@ boot().catch((error) => {
 
 async function boot() {
   bindUi();
+  await enforceAppVersion();
   loadProfilePhoto();
   registerPwa();
   applyConfigToForm();
@@ -175,6 +180,42 @@ async function boot() {
     flushQueues();
   }
   setComposerLocked(false);
+}
+
+async function enforceAppVersion() {
+  const previousVersion = localStorage.getItem(STORAGE_KEYS.appVersion);
+  if (previousVersion === APP_VERSION) {
+    return;
+  }
+
+  localStorage.setItem(STORAGE_KEYS.appVersion, APP_VERSION);
+
+  // First run on a device should not trigger a forced reload.
+  if (!previousVersion) {
+    return;
+  }
+
+  const reloadGuard = `reloaded-${APP_VERSION}`;
+  if (sessionStorage.getItem(reloadGuard) === '1') {
+    return;
+  }
+
+  try {
+    if (typeof caches !== 'undefined' && caches.keys) {
+      const cacheKeys = await caches.keys();
+      await Promise.all(cacheKeys.map((key) => caches.delete(key)));
+    }
+
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.update()));
+    }
+
+    sessionStorage.setItem(reloadGuard, '1');
+    window.location.reload();
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function bindUi() {
@@ -482,7 +523,7 @@ async function registerPwa() {
     return;
   }
   try {
-    const registration = await navigator.serviceWorker.register('sw.js');
+    const registration = await navigator.serviceWorker.register(`sw.js?v=${encodeURIComponent(APP_VERSION)}`);
     registration.update().catch(() => {
     });
     navigator.serviceWorker.addEventListener('controllerchange', () => {
@@ -595,6 +636,9 @@ function updateProfileFallbackInitial() {
   if (elements.profileAvatarFallback) {
     elements.profileAvatarFallback.textContent = initial;
   }
+  if (elements.profileAvatarFallbackTopbar) {
+    elements.profileAvatarFallbackTopbar.textContent = initial;
+  }
 }
 
 function syncProfileAvatarVisibility() {
@@ -602,6 +646,9 @@ function syncProfileAvatarVisibility() {
   const hasSrc = rawSrc.trim().length > 0;
   if (elements.profileAvatarFallback) {
     elements.profileAvatarFallback.style.opacity = hasSrc ? '0' : '1';
+  }
+  if (elements.profileAvatarFallbackTopbar) {
+    elements.profileAvatarFallbackTopbar.style.opacity = hasSrc ? '0' : '1';
   }
 }
 
@@ -702,12 +749,19 @@ async function saveProfilePhoto(file) {
     // Show preview immediately so the UI feels instant.
     const instantPreviewUrl = URL.createObjectURL(file);
     elements.profileAvatarImg.src = instantPreviewUrl;
+    if (elements.profileAvatarImgTopbar) {
+      elements.profileAvatarImgTopbar.src = instantPreviewUrl;
+      elements.profileAvatarImgTopbar.style.opacity = '1';
+    }
     elements.profileAvatarImg.style.opacity = '1';
     syncProfileAvatarVisibility();
 
     const optimizedDataUrl = await optimizeProfilePhoto(file);
     localStorage.setItem(STORAGE_KEYS.profilePhoto, optimizedDataUrl);
     elements.profileAvatarImg.src = optimizedDataUrl;
+    if (elements.profileAvatarImgTopbar) {
+      elements.profileAvatarImgTopbar.src = optimizedDataUrl;
+    }
     syncProfileAvatarVisibility();
     setComposerHint('Foto de perfil actualizada.');
     window.setTimeout(() => URL.revokeObjectURL(instantPreviewUrl), 1000);
@@ -724,8 +778,15 @@ function loadProfilePhoto() {
     if (photoDataUrl) {
       elements.profileAvatarImg.src = photoDataUrl;
       elements.profileAvatarImg.style.opacity = '1';
+      if (elements.profileAvatarImgTopbar) {
+        elements.profileAvatarImgTopbar.src = photoDataUrl;
+        elements.profileAvatarImgTopbar.style.opacity = '1';
+      }
     } else {
       elements.profileAvatarImg.removeAttribute('src');
+      if (elements.profileAvatarImgTopbar) {
+        elements.profileAvatarImgTopbar.removeAttribute('src');
+      }
     }
     syncProfileAvatarVisibility();
   } catch (error) {
