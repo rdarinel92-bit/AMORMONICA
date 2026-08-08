@@ -6,5 +6,5 @@ alter table if exists public.messages
 
 -- Index for faster queries on non-deleted messages
 create index if not exists idx_messages_not_deleted 
-  on public.messages (session_id, created_at) 
+  on public.messages (session_id, timestamp) 
   where deleted_at is null;

@@ -2267,7 +2267,7 @@ function formatDate(value) {
 }
 
 function persistMessages() {
-  saveJson(userStorageKey(STORAGE_KEYS.localMessages), state.messages);
+  saveJson(userStorageKey(STORAGE_KEYS.localMessages), state.messages.map(sanitizePersistedMessage));
 }
 
 function persistQueuedTexts() {
@@ -2279,11 +2279,24 @@ function persistKnownRemoteIds() {
 }
 
 function loadActiveUserState() {
-  state.messages = loadUserJson(STORAGE_KEYS.localMessages, []);
+  state.messages = loadUserJson(STORAGE_KEYS.localMessages, []).map(sanitizePersistedMessage);
   state.queuedTexts = loadUserJson(STORAGE_KEYS.queuedTexts, []);
   state.knownRemoteIds = new Set(loadUserJson(STORAGE_KEYS.knownRemoteIds, []));
   state.autoSavedImages = new Set(loadUserJson(STORAGE_KEYS.autoSavedImages, []));
   state.emojiRecent = loadUserJson(STORAGE_KEYS.emojiRecent, []);
+}
+
+function sanitizePersistedMessage(message) {
+  if (!message || typeof message !== 'object') {
+    return message;
+  }
+
+  const sanitized = { ...message };
+  const previewUrl = String(sanitized.previewUrl || '').trim();
+  if (previewUrl.startsWith('blob:') || sanitized.status === 'sent' || sanitized.status === 'read' || sanitized.status === 'delivered') {
+    sanitized.previewUrl = '';
+  }
+  return sanitized;
 }
 
 function userStorageKey(baseKey) {
@@ -2790,7 +2803,7 @@ async function renderImageMessage(message, container, loadingNode, selected = fa
       return;
     }
 
-    let src = message.previewUrl || '';
+    let src = isRenderableMediaUrl(message.previewUrl) ? message.previewUrl : '';
     if (!src && message.content) {
       src = await resolveImageSource(message.content);
     }
@@ -2802,8 +2815,23 @@ async function renderImageMessage(message, container, loadingNode, selected = fa
     image.alt = `Imagen de ${message.sender || 'usuario'}`;
     image.src = src;
     image.loading = 'lazy';
+    image.addEventListener('error', async () => {
+      if (image.dataset.fallbackTried === '1') {
+        loadingNode.textContent = 'No se pudo acceder a la imagen';
+        return;
+      }
+
+      const fallbackSrc = message.content ? await resolveImageSource(message.content).catch(() => '') : '';
+      if (fallbackSrc && fallbackSrc !== image.src) {
+        image.dataset.fallbackTried = '1';
+        image.src = fallbackSrc;
+        return;
+      }
+
+      loadingNode.textContent = 'No se pudo acceder a la imagen';
+    });
     image.addEventListener('click', () => {
-      window.open(src, '_blank', 'noopener');
+      window.open(image.src || src, '_blank', 'noopener');
     });
     const actions = document.createElement('div');
     actions.className = 'image-actions';
@@ -2813,7 +2841,7 @@ async function renderImageMessage(message, container, loadingNode, selected = fa
     downloadButton.className = 'button ghost button-icon image-download';
     downloadButton.innerHTML = '<span class="icon">⇩</span><span>Descargar imagen</span>';
     downloadButton.addEventListener('click', async () => {
-      await downloadMediaAsset(message, src, 'imagen');
+      await downloadMediaAsset(message, image.src || src, 'imagen');
     });
 
     actions.appendChild(downloadButton);
@@ -2880,7 +2908,7 @@ async function renderAudioMessage(message, container, loadingNode, selected = fa
       return;
     }
 
-    let src = message.previewUrl || '';
+    let src = isRenderableMediaUrl(message.previewUrl) ? message.previewUrl : '';
     if (!src && message.content) {
       src = await resolveAudioSource(message.content);
     }
@@ -2896,6 +2924,22 @@ async function renderAudioMessage(message, container, loadingNode, selected = fa
     audio.controls = true;
     audio.preload = 'auto';
     audio.src = src;
+    audio.addEventListener('error', async () => {
+      if (audio.dataset.fallbackTried === '1') {
+        loadingNode.textContent = 'No se pudo acceder al audio';
+        return;
+      }
+
+      const fallbackSrc = message.content ? await resolveAudioSource(message.content).catch(() => '') : '';
+      if (fallbackSrc && fallbackSrc !== audio.src) {
+        audio.dataset.fallbackTried = '1';
+        audio.src = fallbackSrc;
+        audio.load();
+        return;
+      }
+
+      loadingNode.textContent = 'No se pudo acceder al audio';
+    });
     frame.appendChild(audio);
 
     if (Number(message.duration_ms || 0) > 0) {
@@ -2931,7 +2975,7 @@ async function renderAudioMessage(message, container, loadingNode, selected = fa
     downloadButton.className = 'button ghost button-icon image-download';
     downloadButton.innerHTML = '<span class="icon">⇩</span><span>Descargar audio</span>';
     downloadButton.addEventListener('click', async () => {
-      await downloadMediaAsset(message, src, 'audio');
+      await downloadMediaAsset(message, audio.src || src, 'audio');
     });
     actions.appendChild(downloadButton);
 
@@ -3059,6 +3103,17 @@ function buildCopyableMediaReference(message) {
     .map((segment) => encodeURIComponent(segment))
     .join('/');
   return `${baseUrl}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encodedPath}`;
+}
+
+function isRenderableMediaUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return false;
+  }
+  if (text.startsWith('blob:')) {
+    return false;
+  }
+  return text.startsWith('data:') || /^https?:\/\//i.test(text);
 }
 
 async function autoSaveReceivedImage(message, src) {

@@ -1,0 +1,8 @@
+{
+  "appId": "com.rober.chatprivadoligero",
+  "appName": "Chat Privado Ligero",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}
