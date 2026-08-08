@@ -740,7 +740,18 @@ function bindUi() {
       elements.installApp.hidden = true;
       elements.installApp.setAttribute('aria-hidden', 'true');
     }
-    setComposerHint('\u2713 ¡Instalada! Búscala en tu pantalla de inicio o en el cajón de apps. Si no la ves, desliza hacia la derecha en el home.');
+    setComposerHint('\u2713 ¡Instalada! Si el teléfono lo permite, se abrirá la app ahora; si no, búscala en la pantalla de inicio o en el cajón de apps.');
+    window.setTimeout(() => {
+      try {
+        if (isRunningStandalone()) {
+          return;
+        }
+        const targetUrl = new URL('./', window.location.href).toString();
+        window.location.assign(targetUrl);
+      } catch (_error) {
+        // Ignore: some browsers block navigation after install.
+      }
+    }, 250);
   });
 
   document.addEventListener('visibilitychange', () => {
