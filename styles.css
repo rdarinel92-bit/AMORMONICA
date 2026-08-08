@@ -686,33 +686,16 @@ textarea:focus {
 .message.mine .message-state[data-state='sent'],
 .message.mine .message-state[data-state='delivered'],
 .message.mine .message-state[data-state='read'] {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
   font-weight: 600;
 }
 
 .message.mine .message-state[data-state='sent'],
 .message.mine .message-state[data-state='delivered'] {
-  color: color-mix(in srgb, var(--muted) 82%, white 18%);
+  color: #a0b4c8;
 }
 
 .message.mine .message-state[data-state='read'] {
   color: #69a8ff;
-}
-
-.message.mine .message-state[data-state='read']::before {
-  content: '✓✓';
-  letter-spacing: -0.08em;
-}
-
-.message.mine .message-state[data-state='delivered']::before {
-  content: '✓✓';
-  letter-spacing: -0.08em;
-}
-
-.message.mine .message-state[data-state='sent']::before {
-  content: '✓';
 }
 
 .message-state[data-state='error'] {

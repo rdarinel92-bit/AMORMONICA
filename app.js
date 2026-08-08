@@ -22,7 +22,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v47';
+const APP_VERSION = '2026-08-08-v48';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -2717,31 +2717,33 @@ function buildMessageStatusInfo(message) {
   if (message.status === 'delivered') {
     return {
       state: 'delivered',
-      label: 'entregado'
+      label: '\u2713\u2713 entregado'
     };
   }
   if (message.status === 'read') {
     return {
       state: 'read',
-      label: 'leído'
+      label: '\u2713\u2713 le\u00eddo'
     };
   }
-  if (message.status === 'resumed') {
+  if (message.status === 'resumed' || message.status === 'sent') {
     return {
       state: 'sent',
-      label: 'enviado'
-    };
-  }
-  if (message.status === 'sent') {
-    return {
-      state: 'sent',
-      label: 'enviado'
+      label: '\u2713 enviado'
     };
   }
   if (message.status === 'error') {
     return {
       state: 'error',
       label: 'error'
+    };
+  }
+  // Own message confirmed in Supabase (has remote id) but with an unexpected status:
+  // show as sent rather than hiding all feedback.
+  if (message.id) {
+    return {
+      state: 'sent',
+      label: '\u2713 enviado'
     };
   }
   return {
@@ -5423,7 +5425,7 @@ function buildSetupRequirements() {
     "  type text not null check (type in ('text','image','audio')),",
     "  content text not null default '',",
     '  timestamp timestamptz not null default now(),',
-    "  status text not null default 'pending' check (status in ('sent','pending','resumed')),",
+    "  status text not null default 'pending' check (status in ('pending','sent','resumed','delivered','read','error')),",
     '  chunks_total integer not null default 0,',
     '  chunks_sent integer not null default 0,',
     '  session_id text not null,',
