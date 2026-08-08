@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chat-lite-shell-v1';
+const CACHE_NAME = 'chat-lite-shell-v2';
 const APP_SHELL = [
   './index.html',
   './styles.css',
@@ -42,7 +42,7 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       try {
-        const response = await fetch(request);
+        const response = await fetch(request, { cache: 'no-store' });
         const cache = await caches.open(CACHE_NAME);
         cache.put('./index.html', response.clone());
         return response;
@@ -59,28 +59,14 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(request);
-    if (cached) {
-      event.waitUntil((async () => {
-        try {
-          const response = await fetch(request);
-          if (response.ok) {
-            cache.put(request, response.clone());
-          }
-        } catch {
-          return;
-        }
-      })());
-      return cached;
-    }
-
     try {
-      const response = await fetch(request);
+      const response = await fetch(request, { cache: 'no-store' });
       if (response.ok) {
         cache.put(request, response.clone());
       }
       return response;
     } catch {
+      const cached = await cache.match(request);
       return cached || caches.match('./index.html');
     }
   })());

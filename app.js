@@ -21,6 +21,7 @@ const ENC_PREFIX = 'enc:v1:';
 const DAILY_UNLOCK_MS = 24 * 60 * 60 * 1000;
 const imageCache = new Map();
 let deferredInstallPrompt = null;
+let serviceWorkerReloaded = false;
 const COMMON_TYPO_FIXES = {
   adme: 'dame',
   corectas: 'correctas',
@@ -366,7 +367,16 @@ async function registerPwa() {
     return;
   }
   try {
-    await navigator.serviceWorker.register('sw.js');
+    const registration = await navigator.serviceWorker.register('sw.js');
+    registration.update().catch(() => {
+    });
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (serviceWorkerReloaded) {
+        return;
+      }
+      serviceWorkerReloaded = true;
+      window.location.reload();
+    });
   } catch (error) {
     console.warn('No se pudo registrar el service worker', error);
   }
