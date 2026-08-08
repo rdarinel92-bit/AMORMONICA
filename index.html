@@ -39,6 +39,7 @@
         <span class="profile-camera-icon">📷</span>
       </button>
       <div id="profile-menu" class="profile-menu" role="menu" hidden>
+        <button id="profile-switch-user" class="profile-menu-item" type="button" role="menuitem">↩ Salir</button>
         <button id="profile-change-photo" class="profile-menu-item" type="button" role="menuitem">Cambiar imagen</button>
         <button id="profile-clear-photo" class="profile-menu-item danger" type="button" role="menuitem">Quitar imagen</button>
       </div>
@@ -64,14 +65,6 @@
     <button id="net-fab" class="net-fab" type="button" aria-controls="net-panel" aria-expanded="false">Red: <span id="net-fab-mode">--</span></button>
     <section id="net-panel" class="net-panel" aria-label="Estado de conexión" hidden>
       <div class="net-actions net-toggle-row">
-        <label class="toggle-chip">
-          <input id="force-images" type="checkbox">
-          <span>Forzar imagen</span>
-        </label>
-        <label class="toggle-chip">
-          <input id="data-saver" type="checkbox">
-          <span>Ahorro datos</span>
-        </label>
         <label class="toggle-chip">
           <input id="haptics" type="checkbox">
           <span>Vibración</span>
@@ -226,13 +219,14 @@
         </section>
         <div class="composer-actions">
           <label class="button ghost file-button button-icon" for="image-input"><span class="icon">＋</span><span>Imagen</span></label>
+          <button id="voice-record" class="button ghost button-icon voice-record" type="button" aria-pressed="false" aria-label="Grabar nota de voz"><span class="icon">●</span><span>Voz</span></button>
           <button id="send-location" class="button ghost button-icon" type="button" aria-label="Compartir ubicación aproximada"><span class="icon">⌖</span><span>Ubicación</span></button>
           <button id="emoji-toggle" class="button ghost button-icon" type="button" aria-expanded="false" aria-controls="emoji-panel"><span class="icon">☺</span><span>Emoji</span></button>
           <button id="send-button" class="button button-icon" type="submit"><span class="icon">➤</span><span>Enviar</span></button>
         </div>
       </form>
       <input id="image-input" type="file" accept="image/*" multiple hidden>
-      <p id="composer-hint" class="hint">Sin audio por defecto. El modo de conexión ajusta la compresión automáticamente.</p>
+      <p id="composer-hint" class="hint">Mantén pulsado Voz para grabar y suelta para enviar. Si no hay red, queda en cola y reintenta automáticamente.</p>
     </section>
   </main>
 
@@ -247,6 +241,6 @@
     </article>
   </template>
 
-  <script src="app.js?v=20"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>

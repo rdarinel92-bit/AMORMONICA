@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v20';
+const APP_VERSION = '2026-08-08-v22';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -25,9 +25,12 @@ const CACHE_STORE = 'cache';
 const CHUNK_SIZE = 5 * 1024;
 const HEARTBEAT_MS = 25000;
 const PROBE_HISTORY = 8;
-const IMAGE_UPLOAD_MAX_RETRIES = 4;
+const IMAGE_UPLOAD_MAX_RETRIES = 0;
 const IMAGE_UPLOAD_RETRY_BASE_MS = 1500;
+const IMAGE_UPLOAD_RETRY_MAX_MS = 60000;
 const IMAGE_DRAFT_PREVIEW_ENABLED = false;
+const VOICE_MAX_SECONDS = 120;
+const VOICE_MIN_BYTES = 400;
 const RESET_FUNCTION_TIMEOUT_MS = 25000;
 const HISTORY_PAGE_SIZE = 80;
 const ENC_PREFIX = 'enc:v1:';
@@ -86,8 +89,8 @@ const state = {
   activeUploadLocalId: '',
   uploadPumpRunning: false,
   autoSavedImages: new Set(loadJson(STORAGE_KEYS.autoSavedImages, [])),
-  forceImages: loadJson(STORAGE_KEYS.forceImages, false),
-  dataSaver: loadJson(STORAGE_KEYS.dataSaver, true),
+  forceImages: loadJson(STORAGE_KEYS.forceImages, true),
+  dataSaver: false,
   haptics: loadJson(STORAGE_KEYS.haptics, false),
   e2eeUnlockUntil: loadJson(STORAGE_KEYS.e2eeUnlockUntil, 0),
   selectedMessageKey: '',
@@ -107,7 +110,12 @@ const state = {
   emojiPanelOpen: false,
   emojiPanelManuallyClosed: false,
   emojiCategory: 'recientes',
-  emojiRecent: loadJson(STORAGE_KEYS.emojiRecent, [])
+  emojiRecent: loadJson(STORAGE_KEYS.emojiRecent, []),
+  voiceRecorder: null,
+  voiceStream: null,
+  voiceChunks: [],
+  voiceStartedAt: 0,
+  voiceStopTimer: null
 };
 
 const EMOJI_CATEGORIES = {
@@ -205,6 +213,7 @@ const elements = {
   profileTriggerFloating: document.getElementById('profile-trigger-floating'),
   profileTriggerTopbar: document.getElementById('profile-trigger-topbar'),
   profileMenu: document.getElementById('profile-menu'),
+  profileSwitchUser: document.getElementById('profile-switch-user'),
   profileChangePhoto: document.getElementById('profile-change-photo'),
   profileClearPhoto: document.getElementById('profile-clear-photo'),
   profileAvatarImg: document.getElementById('profile-avatar-img'),
@@ -216,7 +225,9 @@ const elements = {
   emojiRecentGrid: document.getElementById('emoji-recent-grid'),
   emojiGrid: document.getElementById('emoji-grid'),
   emojiToggle: document.getElementById('emoji-toggle'),
-  emojiPanelClose: document.getElementById('emoji-panel-close')
+  emojiPanelClose: document.getElementById('emoji-panel-close'),
+  voiceRecord: document.getElementById('voice-record'),
+  loadMoreHistory: document.getElementById('load-more-history')
 };
 
 boot().catch((error) => {
@@ -232,6 +243,11 @@ async function boot() {
   applyUrlContext();
   renderEmojiPanel();
   loadProfilePhoto();
+  updateVoiceRecordButton();
+  if (elements.voiceRecord && !canUseVoiceNotes()) {
+    elements.voiceRecord.disabled = true;
+    elements.voiceRecord.title = 'Grabación no soportada en este navegador';
+  }
   registerPwa();
   applyConfigToForm();
   setComposerLocked(true);
@@ -488,17 +504,6 @@ function bindUi() {
     });
   }
 
-  if (elements.dataSaver) {
-    elements.dataSaver.addEventListener('change', () => {
-      state.dataSaver = Boolean(elements.dataSaver.checked);
-      saveJson(STORAGE_KEYS.dataSaver, state.dataSaver);
-      setComposerHint(state.dataSaver
-        ? 'Ahorro de datos activado (modo Cuba).'
-        : 'Ahorro de datos desactivado.');
-      updateConnectionUi();
-    });
-  }
-
   if (elements.haptics) {
     elements.haptics.addEventListener('change', () => {
       state.haptics = Boolean(elements.haptics.checked);
@@ -537,6 +542,72 @@ function bindUi() {
     });
   }
 
+  if (elements.voiceRecord) {
+    let holdTimer = 0;
+    let holdStartedRecording = false;
+
+    const clearHoldTimer = () => {
+      if (!holdTimer) {
+        return;
+      }
+      window.clearTimeout(holdTimer);
+      holdTimer = 0;
+    };
+
+    elements.voiceRecord.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return;
+      }
+      holdStartedRecording = false;
+      clearHoldTimer();
+      holdTimer = window.setTimeout(() => {
+        holdTimer = 0;
+        startVoiceRecording().then(() => {
+          holdStartedRecording = Boolean(state.voiceRecorder && state.voiceRecorder.state === 'recording');
+          if (holdStartedRecording) {
+            setComposerHint('Grabando... suelta para enviar.');
+          }
+        }).catch((error) => {
+          console.error(error);
+        });
+      }, 160);
+    });
+
+    const stopHoldRecording = () => {
+      clearHoldTimer();
+      const recording = Boolean(state.voiceRecorder && state.voiceRecorder.state === 'recording');
+      if (!recording) {
+        return;
+      }
+      stopVoiceRecording().catch((error) => {
+        console.error(error);
+      });
+    };
+
+    elements.voiceRecord.addEventListener('pointerup', stopHoldRecording);
+    elements.voiceRecord.addEventListener('pointercancel', stopHoldRecording);
+    elements.voiceRecord.addEventListener('pointerleave', () => {
+      if (holdStartedRecording) {
+        stopHoldRecording();
+      } else {
+        clearHoldTimer();
+      }
+    });
+
+    elements.voiceRecord.addEventListener('keydown', async (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') {
+        return;
+      }
+      event.preventDefault();
+      const recording = Boolean(state.voiceRecorder && state.voiceRecorder.state === 'recording');
+      if (recording) {
+        await stopVoiceRecording();
+      } else {
+        await startVoiceRecording();
+      }
+    });
+  }
+
   if (elements.installApp) {
     elements.installApp.addEventListener('click', async () => {
       if (!deferredInstallPrompt) {
@@ -570,6 +641,17 @@ function bindUi() {
       elements.installApp.setAttribute('aria-hidden', 'true');
     }
     setComposerHint('Aplicación instalada.');
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopVoiceRecording().catch(() => {
+      });
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    stopVoiceCaptureStream();
   });
 
   document.addEventListener('click', (event) => {
@@ -794,6 +876,12 @@ function bindUi() {
     });
   }
 
+  if (elements.profileSwitchUser) {
+    elements.profileSwitchUser.addEventListener('click', () => {
+      switchUserIdentity();
+    });
+  }
+
   if (elements.emojiToggle) {
     elements.emojiToggle.addEventListener('click', () => {
       const wasOpen = state.emojiPanelOpen;
@@ -969,9 +1057,6 @@ function applyConfigToForm() {
   if (elements.forceImages) {
     elements.forceImages.checked = state.forceImages;
   }
-  if (elements.dataSaver) {
-    elements.dataSaver.checked = state.dataSaver;
-  }
   if (elements.haptics) {
     elements.haptics.checked = state.haptics;
   }
@@ -1086,6 +1171,24 @@ function updateActiveUserUi() {
   updateSyncSummary();
 }
 
+function switchUserIdentity() {
+  hideProfileMenu();
+  const deviceId = ensureDeviceId();
+  state.identity = '';
+  state.config.senderId = '';
+  if (deviceId && state.identityByDevice[deviceId]) {
+    delete state.identityByDevice[deviceId];
+  }
+  saveJson(STORAGE_KEYS.identity, state.identity);
+  saveJson(STORAGE_KEYS.identityByDevice, state.identityByDevice);
+  saveJson(STORAGE_KEYS.config, state.config);
+  elements.senderId.value = '';
+  elements.identityCustom.value = '';
+  setIdentityGateVisible(true);
+  updateActiveUserUi();
+  setComposerHint('Selecciona el usuario para continuar.');
+}
+
 function updateProfileFallbackInitial() {
   const name = formatUserName(state.config.senderId || state.identity || 'U');
   const initial = String(name || 'U').trim().charAt(0).toUpperCase() || 'U';
@@ -1109,8 +1212,11 @@ function syncProfileAvatarVisibility() {
 }
 
 function setComposerLocked(locked) {
-  const nodes = [elements.messageInput, elements.imageInput];
+  const nodes = [elements.messageInput, elements.imageInput, elements.voiceRecord];
   for (const node of nodes) {
+    if (!node) {
+      continue;
+    }
     node.disabled = locked;
   }
   const submitButton = document.getElementById('send-button');
@@ -1156,6 +1262,161 @@ function setComposerHint(text) {
     }
   }
   elements.composerHint.textContent = text;
+}
+
+function canUseVoiceNotes() {
+  return Boolean(
+    navigator.mediaDevices
+    && typeof navigator.mediaDevices.getUserMedia === 'function'
+    && typeof window.MediaRecorder !== 'undefined'
+  );
+}
+
+function chooseVoiceMimeType() {
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus'
+  ];
+  for (const mimeType of candidates) {
+    if (typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(mimeType)) {
+      return mimeType;
+    }
+  }
+  return '';
+}
+
+function updateVoiceRecordButton() {
+  if (!elements.voiceRecord) {
+    return;
+  }
+  const recording = Boolean(state.voiceRecorder && state.voiceRecorder.state === 'recording');
+  elements.voiceRecord.classList.toggle('recording', recording);
+  elements.voiceRecord.setAttribute('aria-pressed', recording ? 'true' : 'false');
+  elements.voiceRecord.innerHTML = recording
+    ? '<span class="icon">■</span><span>Detener</span>'
+    : '<span class="icon">●</span><span>Voz</span>';
+}
+
+function stopVoiceCaptureStream() {
+  if (!state.voiceStream) {
+    return;
+  }
+  for (const track of state.voiceStream.getTracks()) {
+    track.stop();
+  }
+  state.voiceStream = null;
+}
+
+function clearVoiceRecordingState() {
+  if (state.voiceStopTimer) {
+    window.clearTimeout(state.voiceStopTimer);
+    state.voiceStopTimer = null;
+  }
+  state.voiceRecorder = null;
+  state.voiceChunks = [];
+  state.voiceStartedAt = 0;
+  stopVoiceCaptureStream();
+  updateVoiceRecordButton();
+}
+
+async function startVoiceRecording() {
+  if (!canUseVoiceNotes()) {
+    setComposerHint('Notas de voz no disponibles en este dispositivo.');
+    return;
+  }
+  if (!isConfigured()) {
+    setComposerHint('Configura Supabase antes de enviar notas de voz.');
+    return;
+  }
+  if (state.voiceRecorder && state.voiceRecorder.state === 'recording') {
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        noiseSuppression: true,
+        echoCancellation: true,
+        channelCount: 1
+      }
+    });
+    const mimeType = chooseVoiceMimeType();
+    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+
+    state.voiceStream = stream;
+    state.voiceRecorder = recorder;
+    state.voiceChunks = [];
+    state.voiceStartedAt = Date.now();
+
+    recorder.addEventListener('dataavailable', (event) => {
+      if (event.data && event.data.size > 0) {
+        state.voiceChunks.push(event.data);
+      }
+    });
+
+    recorder.addEventListener('stop', async () => {
+      const chunks = Array.from(state.voiceChunks || []);
+      const durationMs = Math.max(1, Date.now() - Number(state.voiceStartedAt || Date.now()));
+      const contentType = recorder.mimeType || mimeType || 'audio/webm';
+      clearVoiceRecordingState();
+
+      if (chunks.length === 0) {
+        setComposerHint('No se detectó audio.');
+        return;
+      }
+
+      const blob = new Blob(chunks, { type: contentType });
+      if (blob.size < VOICE_MIN_BYTES) {
+        setComposerHint('Nota muy corta. Intenta grabar un poco más.');
+        return;
+      }
+
+      try {
+        await enqueueAudioMessage(blob, {
+          durationMs,
+          contentType,
+          fileName: `nota-${Date.now()}.webm`
+        });
+      } catch (error) {
+        console.error(error);
+        setComposerHint('No se pudo encolar la nota de voz.');
+      }
+    });
+
+    recorder.addEventListener('error', (event) => {
+      console.error(event.error || event);
+      clearVoiceRecordingState();
+      setComposerHint('Error de grabación de audio.');
+    });
+
+    recorder.start(700);
+    state.voiceStopTimer = window.setTimeout(() => {
+      stopVoiceRecording().catch((error) => {
+        console.error(error);
+      });
+    }, VOICE_MAX_SECONDS * 1000);
+
+    updateVoiceRecordButton();
+    setComposerHint('Grabando nota de voz...');
+  } catch (error) {
+    console.error(error);
+    clearVoiceRecordingState();
+    setComposerHint('No se pudo acceder al micrófono.');
+  }
+}
+
+async function stopVoiceRecording() {
+  if (!state.voiceRecorder || state.voiceRecorder.state !== 'recording') {
+    return;
+  }
+  if (state.voiceStopTimer) {
+    window.clearTimeout(state.voiceStopTimer);
+    state.voiceStopTimer = null;
+  }
+  state.voiceRecorder.stop();
+  setComposerHint('Procesando nota de voz...');
 }
 
 function renderEmojiPanel() {
@@ -1538,7 +1799,7 @@ function renderMessages() {
     if (message.type === 'image') {
       if (message.status === 'error' && !message.content) {
         const text = document.createElement('p');
-        text.textContent = own ? 'Imagen cancelada.' : 'Imagen cancelada por el remitente.';
+        text.textContent = own ? 'Imagen no enviada (error de subida).' : 'Imagen no disponible.';
         body.appendChild(text);
         elements.chatLog.appendChild(fragment);
         continue;
@@ -1547,6 +1808,18 @@ function renderMessages() {
       loading.textContent = message.status === 'pending' ? 'Imagen pendiente...' : 'Cargando imagen...';
       body.appendChild(loading);
       renderImageMessage(message, body, loading, selected);
+    } else if (message.type === 'audio') {
+      if (message.status === 'error' && !message.content) {
+        const text = document.createElement('p');
+        text.textContent = own ? 'Audio no enviado (error de subida).' : 'Audio no disponible.';
+        body.appendChild(text);
+        elements.chatLog.appendChild(fragment);
+        continue;
+      }
+      const loading = document.createElement('p');
+      loading.textContent = message.status === 'pending' ? 'Audio pendiente...' : 'Cargando audio...';
+      body.appendChild(loading);
+      renderAudioMessage(message, body, loading, selected);
     } else {
       const text = document.createElement('p');
       text.textContent = message.display_content || message.content || '';
@@ -1594,7 +1867,7 @@ function buildStatusLabel(message) {
   if (!isOwnMessage(message)) {
     return message.status === 'read' ? 'visto' : 'recibido';
   }
-  if (message.type === 'image' && message.status === 'pending') {
+  if ((message.type === 'image' || message.type === 'audio') && message.status === 'pending') {
     return `pendiente ${message.chunks_sent || 0}/${message.chunks_total || 0}`;
   }
   if (message.status === 'delivered') {
@@ -1640,7 +1913,7 @@ async function renderImageMessage(message, container, loadingNode, selected = fa
     downloadButton.className = 'button ghost button-icon image-download';
     downloadButton.innerHTML = '<span class="icon">⇩</span><span>Descargar imagen</span>';
     downloadButton.addEventListener('click', async () => {
-      await downloadImageAsset(message, src);
+      await downloadMediaAsset(message, src, 'imagen');
     });
 
     actions.appendChild(downloadButton);
@@ -1651,7 +1924,7 @@ async function renderImageMessage(message, container, loadingNode, selected = fa
       controlButton.className = 'button ghost image-cancel';
       controlButton.textContent = message.status === 'pending' ? 'Cancelar envio' : 'Eliminar del chat';
       controlButton.addEventListener('click', () => {
-        cancelOrRemoveOwnImage(message).catch((error) => {
+        cancelOrRemoveOwnMedia(message).catch((error) => {
           console.error(error);
           setComposerHint('No se pudo completar la accion sobre la imagen.');
         });
@@ -1696,23 +1969,111 @@ async function renderImageMessage(message, container, loadingNode, selected = fa
   }
 }
 
-async function downloadImageAsset(message, src) {
+async function renderAudioMessage(message, container, loadingNode, selected = false) {
   try {
-    const resolved = src || (message.content ? await resolveImageSource(message.content) : '');
+    let src = message.previewUrl || '';
+    if (!src && message.content) {
+      src = await resolveAudioSource(message.content);
+    }
+    if (!src) {
+      loadingNode.textContent = 'Audio en cola';
+      return;
+    }
+
+    const frame = document.createElement('div');
+    frame.className = 'image-frame';
+
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.preload = 'auto';
+    audio.src = src;
+    frame.appendChild(audio);
+
+    if (Number(message.duration_ms || 0) > 0) {
+      const duration = document.createElement('small');
+      duration.className = 'upload-progress-text';
+      duration.textContent = `Duración ${Math.round(Number(message.duration_ms) / 1000)}s`;
+      frame.appendChild(duration);
+    }
+
+    if (isOwnMessage(message) && message.status === 'pending' && Number(message.chunks_total || 0) > 0) {
+      const progressWrap = document.createElement('div');
+      progressWrap.className = 'upload-progress';
+      const progressBar = document.createElement('div');
+      progressBar.className = 'upload-progress-bar';
+      const sent = Number(message.chunks_sent || 0);
+      const total = Math.max(1, Number(message.chunks_total || 1));
+      const percent = Math.max(0, Math.min(100, Math.round((sent / total) * 100)));
+      progressBar.style.width = `${percent}%`;
+      progressWrap.appendChild(progressBar);
+      frame.appendChild(progressWrap);
+
+      const progressText = document.createElement('small');
+      progressText.className = 'upload-progress-text';
+      progressText.textContent = `Subiendo ${sent}/${total} (${percent}%)`;
+      frame.appendChild(progressText);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'image-actions';
+
+    const downloadButton = document.createElement('button');
+    downloadButton.type = 'button';
+    downloadButton.className = 'button ghost button-icon image-download';
+    downloadButton.innerHTML = '<span class="icon">⇩</span><span>Descargar audio</span>';
+    downloadButton.addEventListener('click', async () => {
+      await downloadMediaAsset(message, src, 'audio');
+    });
+    actions.appendChild(downloadButton);
+
+    if (isOwnMessage(message)) {
+      const controlButton = document.createElement('button');
+      controlButton.type = 'button';
+      controlButton.className = 'button ghost image-cancel';
+      controlButton.textContent = message.status === 'pending' ? 'Cancelar envio' : 'Eliminar del chat';
+      controlButton.addEventListener('click', () => {
+        cancelOrRemoveOwnMedia(message).catch((error) => {
+          console.error(error);
+          setComposerHint('No se pudo completar la accion sobre el audio.');
+        });
+      });
+      controlButton.hidden = !selected;
+      actions.appendChild(controlButton);
+    }
+
+    frame.appendChild(actions);
+    loadingNode.replaceWith(frame);
+  } catch (error) {
+    loadingNode.textContent = 'Audio atrasado. Reintentando...';
+    scheduleImageRetry(message);
+    console.error(error);
+  }
+}
+
+async function downloadMediaAsset(message, src, label) {
+  try {
+    const isAudio = message.type === 'audio';
+    const resolved = src || (message.content
+      ? (isAudio ? await resolveAudioSource(message.content) : await resolveImageSource(message.content))
+      : '');
     if (!resolved) {
-      throw new Error('No hay imagen para descargar');
+      throw new Error(`No hay ${label} para descargar`);
     }
     const anchor = document.createElement('a');
     anchor.href = resolved;
-    anchor.download = `imagen-${message.local_id || message.id || Date.now()}.jpg`;
+    anchor.download = `${label}-${message.local_id || message.id || Date.now()}${isAudio ? '.webm' : '.jpg'}`;
     anchor.rel = 'noopener';
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
   } catch (error) {
     console.error(error);
-    setComposerHint('No se pudo descargar la imagen. Intenta de nuevo.');
+    setComposerHint(`No se pudo descargar ${label}. Intenta de nuevo.`);
   }
+}
+
+async function downloadImageAsset(message, src) {
+  return downloadMediaAsset(message, src, 'imagen');
 }
 
 async function autoSaveReceivedImage(message, src) {
@@ -1747,10 +2108,18 @@ function scheduleImageRetry(message) {
 }
 
 async function resolveImageSource(content) {
+  return resolveChunkedAsset(content, 'image/jpeg', /\.(png|jpg|jpeg|gif|webp)$/i, 'No se pudo leer un bloque de imagen');
+}
+
+async function resolveAudioSource(content) {
+  return resolveChunkedAsset(content, 'audio/webm', /\.(webm|ogg|mp3|m4a|wav)$/i, 'No se pudo leer un bloque de audio');
+}
+
+async function resolveChunkedAsset(content, fallbackContentType, inlinePattern, chunkErrorText) {
   if (imageCache.has(content)) {
     return imageCache.get(content);
   }
-  if (content.startsWith('data:') || /\.(png|jpg|jpeg|gif|webp)$/i.test(content)) {
+  if (content.startsWith('data:') || inlinePattern.test(content)) {
     imageCache.set(content, content);
     return content;
   }
@@ -1760,7 +2129,7 @@ async function resolveImageSource(content) {
     const partUrl = publicStorageUrl(manifest.chunks[index].path);
     const response = await fetchStorageChunk(partUrl);
     if (!response.ok) {
-      throw new Error('No se pudo leer un bloque de imagen');
+      throw new Error(chunkErrorText);
     }
     const arrayBuffer = await response.arrayBuffer();
     const actualHash = await sha256Hex(arrayBuffer);
@@ -1770,7 +2139,7 @@ async function resolveImageSource(content) {
     buffers.push(arrayBuffer);
   }
   const merged = mergeArrayBuffers(buffers);
-  const blob = new Blob([merged], { type: manifest.contentType || 'image/jpeg' });
+  const blob = new Blob([merged], { type: manifest.contentType || fallbackContentType });
   const objectUrl = URL.createObjectURL(blob);
   imageCache.set(content, objectUrl);
   await dbPut(CACHE_STORE, { id: content, blob });
@@ -1952,7 +2321,11 @@ function removeLocalMessage(localId) {
 }
 
 async function cancelOrRemoveOwnImage(message) {
-  if (!message || message.type !== 'image' || !isOwnMessage(message) || !message.local_id) {
+  return cancelOrRemoveOwnMedia(message);
+}
+
+async function cancelOrRemoveOwnMedia(message) {
+  if (!message || (message.type !== 'image' && message.type !== 'audio') || !isOwnMessage(message) || !message.local_id) {
     return;
   }
 
@@ -1969,7 +2342,7 @@ async function cancelOrRemoveOwnImage(message) {
   await dbDelete(UPLOAD_STORE, message.local_id);
 
   if (message.content) {
-    await deleteOwnImageAssets(message).catch((error) => {
+    await deleteOwnMediaAssets(message).catch((error) => {
       console.error(error);
     });
 
@@ -1994,7 +2367,9 @@ async function cancelOrRemoveOwnImage(message) {
         chunks_sent: 0
       }).catch(() => {
       });
-      setComposerHint('No se pudo eliminar la imagen. Reintentar...');
+      setComposerHint(message.type === 'audio'
+        ? 'No se pudo eliminar el audio. Reintentar...'
+        : 'No se pudo eliminar la imagen. Reintentar...');
       return;
     }
   } else {
@@ -2004,7 +2379,11 @@ async function cancelOrRemoveOwnImage(message) {
   if (deleteSuccess) {
     removeLocalMessage(message.local_id);
     updateQueueSize();
-    setComposerHint(isPending ? 'Envio de imagen cancelado.' : 'Imagen eliminada del chat.');
+    if (message.type === 'audio') {
+      setComposerHint(isPending ? 'Envio de audio cancelado.' : 'Audio eliminado del chat.');
+    } else {
+      setComposerHint(isPending ? 'Envio de imagen cancelado.' : 'Imagen eliminada del chat.');
+    }
   }
 }
 
@@ -2013,11 +2392,6 @@ async function showImageDraftPanel(file, extraFiles = []) {
     setComposerHint('Configura Supabase antes de enviar imágenes.');
     return;
   }
-  if (state.mode === 'Ultra-ligero' && !state.forceImages) {
-    setComposerHint('Red muy lenta: la imagen quedó bloqueada. Activa Forzar imagen si la necesitas.');
-    return;
-  }
-
   const targetKb = getTargetImageKb();
   setComposerHint(`Comprimiendo imagen a menos de ${targetKb} KB...`);
 
@@ -2188,11 +2562,6 @@ async function enqueueImageMessage(file) {
     setComposerHint('Configura Supabase antes de enviar imágenes.');
     return '';
   }
-  if (state.mode === 'Ultra-ligero' && !state.forceImages) {
-    setComposerHint('Red muy lenta: la imagen quedó bloqueada. Activa Forzar imagen si la necesitas.');
-    return '';
-  }
-
   let compressed;
   let chunks;
   let localId;
@@ -2230,6 +2599,7 @@ async function enqueueImageMessage(file) {
 
   const uploadJob = {
     id: localId,
+    type: 'image',
     fileName: file.name,
     contentType: compressed.type || 'image/jpeg',
     size: compressed.size,
@@ -2245,7 +2615,7 @@ async function enqueueImageMessage(file) {
 
   state.canceledUploadIds.delete(localId);
   await dbPut(UPLOAD_STORE, uploadJob);
-  await insertPendingImageMessage(message, uploadJob);
+  await insertPendingMediaMessage(message, uploadJob);
   updateQueueSize();
   processUploadJob(uploadJob).catch((error) => {
     console.error(error);
@@ -2255,7 +2625,68 @@ async function enqueueImageMessage(file) {
   return localId;
 }
 
+async function enqueueAudioMessage(blob, metadata = {}) {
+  if (!isConfigured()) {
+    setComposerHint('Configura Supabase antes de enviar audio.');
+    return '';
+  }
+
+  const localId = createId('aud');
+  const chunks = await buildChunkManifest(blob, localId);
+  const previewUrl = URL.createObjectURL(blob);
+  const durationMs = Math.max(1, Number(metadata.durationMs || 0));
+  const contentType = metadata.contentType || blob.type || 'audio/webm';
+  const fileName = metadata.fileName || `nota-${Date.now()}.webm`;
+
+  const message = {
+    local_id: localId,
+    sender: state.config.senderId,
+    type: 'audio',
+    content: '',
+    timestamp: new Date().toISOString(),
+    status: 'pending',
+    chunks_total: chunks.length,
+    chunks_sent: 0,
+    session_id: state.config.sessionId,
+    previewUrl,
+    duration_ms: durationMs
+  };
+  upsertMessage(message);
+
+  const uploadJob = {
+    id: localId,
+    type: 'audio',
+    fileName,
+    contentType,
+    size: blob.size,
+    createdAt: message.timestamp,
+    sessionId: state.config.sessionId,
+    sender: state.config.senderId,
+    uploadedIndices: [],
+    chunks,
+    remoteInserted: false,
+    previewUrl,
+    resumed: false,
+    durationMs
+  };
+
+  state.canceledUploadIds.delete(localId);
+  await dbPut(UPLOAD_STORE, uploadJob);
+  await insertPendingMediaMessage(message, uploadJob);
+  updateQueueSize();
+  processUploadJob(uploadJob).catch((error) => {
+    console.error(error);
+    scheduleUploadRetry(uploadJob, error).catch((nestedError) => console.error(nestedError));
+  });
+  setComposerHint('Nota de voz en cola.');
+  return localId;
+}
+
 async function insertPendingImageMessage(message, uploadJob) {
+  return insertPendingMediaMessage(message, uploadJob);
+}
+
+async function insertPendingMediaMessage(message, uploadJob) {
   if (!state.online) {
     return;
   }
@@ -2298,6 +2729,7 @@ async function processUploadJob(job) {
   if (!liveJob) {
     return;
   }
+  const mediaType = liveJob.type === 'audio' ? 'audio' : 'image';
   for (const chunk of liveJob.chunks) {
     if (state.canceledUploadIds.has(liveJob.id)) {
       clearUploadRetryTimer(liveJob.id);
@@ -2319,18 +2751,19 @@ async function processUploadJob(job) {
     liveJob.uploadedIndices.push(chunk.index);
     liveJob.resumed = liveJob.uploadedIndices.length > 1;
     await dbPut(UPLOAD_STORE, liveJob);
-    await patchImageProgress(liveJob);
+    await patchMediaProgress(liveJob);
   }
 
   const manifest = {
     version: 1,
-    type: 'chunked-image',
+    type: `chunked-${mediaType}`,
     sessionId: liveJob.sessionId,
     sender: liveJob.sender,
     localId: liveJob.id,
     createdAt: liveJob.createdAt,
     contentType: liveJob.contentType,
     size: liveJob.size,
+    durationMs: Number(liveJob.durationMs || 0),
     chunks: liveJob.chunks.map((chunk) => ({
       index: chunk.index,
       path: chunk.path,
@@ -2349,15 +2782,23 @@ async function processUploadJob(job) {
     return;
   }
   const manifestUrl = publicStorageUrl(manifestPath);
-  await finalizeImageMessage(liveJob.id, manifestUrl, liveJob.chunks.length);
+  await finalizeMediaMessage(liveJob.id, manifestUrl, liveJob.chunks.length, mediaType, Number(liveJob.durationMs || 0));
   clearUploadRetryTimer(liveJob.id);
   await dbDelete(UPLOAD_STORE, liveJob.id);
   state.canceledUploadIds.delete(liveJob.id);
   updateQueueSize();
-  setComposerHint(liveJob.resumed ? 'Imagen enviada tras reanudar la subida.' : 'Imagen enviada.');
+  if (mediaType === 'audio') {
+    setComposerHint(liveJob.resumed ? 'Audio enviado tras reanudar la subida.' : 'Audio enviado.');
+  } else {
+    setComposerHint(liveJob.resumed ? 'Imagen enviada tras reanudar la subida.' : 'Imagen enviada.');
+  }
 }
 
 async function patchImageProgress(job) {
+  return patchMediaProgress(job);
+}
+
+async function patchMediaProgress(job) {
   const sent = job.uploadedIndices.length;
   const localMessage = state.messages.find((item) => item.local_id === job.id);
   if (localMessage) {
@@ -2374,6 +2815,10 @@ async function patchImageProgress(job) {
 }
 
 async function finalizeImageMessage(localId, manifestUrl, totalChunks) {
+  return finalizeMediaMessage(localId, manifestUrl, totalChunks, 'image', 0);
+}
+
+async function finalizeMediaMessage(localId, manifestUrl, totalChunks, mediaType, durationMs = 0) {
   const localMessage = state.messages.find((item) => item.local_id === localId);
   if (localMessage) {
     upsertMessage({
@@ -2381,13 +2826,14 @@ async function finalizeImageMessage(localId, manifestUrl, totalChunks) {
       content: manifestUrl,
       status: 'sent',
       chunks_sent: totalChunks,
-      chunks_total: totalChunks
+      chunks_total: totalChunks,
+      duration_ms: durationMs || localMessage.duration_ms || 0
     });
   }
 
   const payload = {
     sender: state.config.senderId,
-    type: 'image',
+    type: mediaType,
     content: manifestUrl,
     timestamp: localMessage ? localMessage.timestamp : new Date().toISOString(),
     status: 'sent',
@@ -2396,6 +2842,9 @@ async function finalizeImageMessage(localId, manifestUrl, totalChunks) {
     session_id: state.config.sessionId,
     local_id: localId
   };
+  if (mediaType === 'audio') {
+    payload.duration_ms = Number(durationMs || 0);
+  }
 
   try {
     await upsertMessageRemote(payload);
@@ -2464,10 +2913,12 @@ async function scheduleUploadRetry(jobOrId, sourceError) {
   }
 
   const retryCount = Number(liveJob.retryCount || 0);
-  if (retryCount >= IMAGE_UPLOAD_MAX_RETRIES) {
+  if (IMAGE_UPLOAD_MAX_RETRIES > 0 && retryCount >= IMAGE_UPLOAD_MAX_RETRIES) {
     clearUploadRetryTimer(jobId);
     markMessageError(jobId);
-    setComposerHint('No se pudo subir la imagen tras varios intentos. Puedes reenviarla.');
+    const failedMessage = state.messages.find((item) => item.local_id === jobId);
+    const mediaLabel = failedMessage && failedMessage.type === 'audio' ? 'audio' : 'imagen';
+    setComposerHint(`No se pudo subir el ${mediaLabel} tras varios intentos. Revisa bucket/policies de Storage y vuelve a intentar.`);
     return;
   }
 
@@ -2476,7 +2927,7 @@ async function scheduleUploadRetry(jobOrId, sourceError) {
   await dbPut(UPLOAD_STORE, liveJob);
   markMessagePending(jobId);
 
-  const waitMs = IMAGE_UPLOAD_RETRY_BASE_MS * (2 ** (nextRetryCount - 1));
+  const waitMs = Math.min(IMAGE_UPLOAD_RETRY_MAX_MS, IMAGE_UPLOAD_RETRY_BASE_MS * (2 ** Math.max(0, nextRetryCount - 1)));
   const timer = window.setTimeout(async () => {
     state.uploadRetryTimers.delete(jobId);
     if (!state.online || !isConfigured() || state.canceledUploadIds.has(jobId)) {
@@ -2493,7 +2944,9 @@ async function scheduleUploadRetry(jobOrId, sourceError) {
   }, waitMs);
 
   state.uploadRetryTimers.set(jobId, timer);
-  setComposerHint(`Reintentando imagen en ${Math.ceil(waitMs / 1000)}s...`);
+  const pendingMessage = state.messages.find((item) => item.local_id === jobId);
+  const mediaLabel = pendingMessage && pendingMessage.type === 'audio' ? 'audio' : 'imagen';
+  setComposerHint(`Reintentando ${mediaLabel} en ${Math.ceil(waitMs / 1000)}s...`);
 }
 
 async function flushQueues() {
@@ -2670,9 +3123,9 @@ async function resetCurrentRoomForAll() {
       setComposerHint('Borrando historial e imágenes de la sala...');
       const remoteMessages = await fetchMessagesForResetFallback();
       for (const message of remoteMessages) {
-        if (message && message.type === 'image' && message.content) {
+        if (message && (message.type === 'image' || message.type === 'audio') && message.content) {
           try {
-            await deleteOwnImageAssets(message);
+            await deleteOwnMediaAssets(message);
           } catch (error) {
             console.error(error);
           }
@@ -2787,6 +3240,7 @@ async function clearCurrentRoomLocalState() {
   state.imageDraftQueue = [];
   state.imageDraft = null;
   state.imageDraftFile = null;
+  clearVoiceRecordingState();
   state.canceledUploadIds.clear();
 
   for (const timer of state.imageRetryTimers.values()) {
@@ -2911,7 +3365,7 @@ function pruneMissingSessionMessages(remoteLocalIds) {
 }
 
 async function deleteStorageObject(path) {
-  const response = await fetch(`${state.supabaseUrl}/storage/v1/object/${state.config.bucketName}/${path}`, {
+  const response = await fetch(`${state.config.supabaseUrl}/storage/v1/object/${state.config.bucketName}/${path}`, {
     method: 'DELETE',
     headers: supabaseHeaders()
   });
@@ -2921,6 +3375,10 @@ async function deleteStorageObject(path) {
 }
 
 async function deleteOwnImageAssets(message) {
+  return deleteOwnMediaAssets(message);
+}
+
+async function deleteOwnMediaAssets(message) {
   if (!message || !message.content) {
     return;
   }
@@ -2962,7 +3420,7 @@ function syncMessageReceipt(message) {
 }
 
 async function uploadFileToStorage(path, blob) {
-  const response = await fetch(`${state.supabaseUrl}/storage/v1/object/${state.config.bucketName}/${path}`, {
+  const response = await fetch(`${state.config.supabaseUrl}/storage/v1/object/${state.config.bucketName}/${path}`, {
     method: 'POST',
     headers: {
       apikey: state.config.supabaseKey,
@@ -3167,9 +3625,6 @@ function selectConnectionMode() {
   if (!isConfigured()) {
     return 'Sin configurar';
   }
-  if (state.dataSaver) {
-    return 'Ahorro-Cuba';
-  }
   if (!state.online || state.kbps < 80 || state.latency > 2000 || state.stability < 0.6 || state.loss > 0.35) {
     return 'Ultra-ligero';
   }
@@ -3195,17 +3650,19 @@ async function restoreUploadJobs() {
   for (const job of jobs) {
     const existing = state.messages.find((item) => item.local_id === job.id);
     if (!existing) {
+      const mediaType = job.type === 'audio' ? 'audio' : 'image';
       upsertMessage({
         local_id: job.id,
         sender: job.sender,
-        type: 'image',
+        type: mediaType,
         content: '',
         timestamp: job.createdAt,
         status: 'pending',
         chunks_total: job.chunks.length,
         chunks_sent: job.uploadedIndices.length,
         session_id: job.sessionId,
-        previewUrl: job.previewUrl || ''
+        previewUrl: job.previewUrl || '',
+        duration_ms: Number(job.durationMs || 0)
       });
     }
   }
@@ -3238,29 +3695,23 @@ function updateSyncSummary() {
 }
 
 function getTargetImageKb() {
-  if (state.dataSaver) {
-    return 22;
-  }
   if (state.mode === 'Ultra-ligero') {
-    return 30;
+    return 80;
   }
   if (state.mode === 'Inteligente') {
-    return 50;
+    return 180;
   }
-  return 150;
+  return 360;
 }
 
 function getMaxDimensionForMode() {
-  if (state.dataSaver) {
-    return 480;
-  }
   if (state.mode === 'Ultra-ligero') {
-    return 560;
+    return 960;
   }
   if (state.mode === 'Inteligente') {
-    return 800;
+    return 1400;
   }
-  return 1600;
+  return 2200;
 }
 
 async function compressImage(file, targetKb, maxDimension) {
@@ -3350,9 +3801,14 @@ async function exportHistory() {
 function buildTranscript() {
   return state.messages.map((message) => {
     const header = `[${formatDate(message.timestamp)}] ${message.sender} ${message.type}`;
-    const body = message.type === 'image'
-      ? message.content || 'imagen-pendiente'
-      : message.display_content || message.content;
+    let body = message.display_content || message.content;
+    if (message.type === 'image') {
+      body = message.content || 'imagen-pendiente';
+    }
+    if (message.type === 'audio') {
+      const seconds = Math.max(0, Math.round(Number(message.duration_ms || 0) / 1000));
+      body = `${message.content || 'audio-pendiente'} (${seconds}s)`;
+    }
     return `${header}\n${body}\n`;
   }).join('\n');
 }
@@ -3575,7 +4031,7 @@ function buildSetupRequirements() {
     '',
     '7. Nota técnica',
     '',
-    'La app usa subida por bloques de 5 KB hacia Storage y guarda un manifiesto JSON para reanudar y reconstruir imágenes con verificación SHA-256.'
+    'La app usa subida por bloques de 5 KB hacia Storage y guarda un manifiesto JSON para reanudar y reconstruir imágenes y audios con verificación SHA-256.'
   ].join('\n');
 }
 

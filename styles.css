@@ -153,6 +153,10 @@ button {
   opacity: 0.96;
 }
 
+#profile-trigger-floating {
+  display: none;
+}
+
 .profile-avatar {
   position: relative;
   width: 38px;
@@ -595,6 +599,26 @@ textarea:focus {
 
 .image-download.saved {
   opacity: 0.7;
+}
+
+.voice-record.recording {
+  border-color: #ff6a6a;
+  color: #ffd2d2;
+  background: rgba(255, 78, 78, 0.22);
+  box-shadow: 0 0 0 1px rgba(255, 90, 90, 0.25) inset;
+}
+
+.voice-record.recording .icon {
+  animation: voiceBlink 0.9s ease-in-out infinite;
+}
+
+@keyframes voiceBlink {
+  0% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 .composer {
