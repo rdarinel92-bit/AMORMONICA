@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v31';
+const APP_VERSION = '2026-08-08-v32';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -1410,9 +1410,21 @@ async function startVoiceRecording() {
     updateVoiceRecordButton();
     setComposerHint('Grabando nota de voz...');
   } catch (error) {
-    console.error(error);
+    console.error('Microphone error:', error);
     clearVoiceRecordingState();
-    setComposerHint('No se pudo acceder al micrófono.');
+    
+    // Provide better error message based on the error type
+    let errorMsg = 'No se pudo acceder al micrófono.';
+    if (error?.name === 'NotAllowedError') {
+      errorMsg = 'Acceso al micrófono denegado. Comprueba los permisos del navegador.';
+    } else if (error?.name === 'NotFoundError') {
+      errorMsg = 'No se encontró micrófono en este dispositivo.';
+    } else if (error?.name === 'SecurityError') {
+      errorMsg = 'Requiere HTTPS para acceder al micrófono.';
+    } else if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+      errorMsg = 'Esta app requiere HTTPS para acceder al micrófono (no http://).';
+    }
+    setComposerHint(errorMsg);
   }
 }
 
@@ -2938,6 +2950,8 @@ async function finalizeMediaMessage(localId, manifestUrl, totalChunks, mediaType
       chunks_total: totalChunks,
       duration_ms: durationMs || localMessage.duration_ms || 0
     });
+    // CRITICAL: Save to localStorage so image persists after reload
+    persistMessages();
   }
 
   const payload = {

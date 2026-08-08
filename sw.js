@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chat-lite-shell-v31';
+const CACHE_NAME = 'chat-lite-shell-v32';
 const APP_SHELL = [
   './index.html',
   './styles.css',
