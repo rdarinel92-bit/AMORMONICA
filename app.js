@@ -13,6 +13,17 @@ const CHUNK_SIZE = 5 * 1024;
 const HEARTBEAT_MS = 25000;
 const PROBE_HISTORY = 8;
 const imageCache = new Map();
+const COMMON_TYPO_FIXES = {
+  adme: 'dame',
+  corectas: 'correctas',
+  escibir: 'escribir',
+  hafga: 'haga',
+  inndex: 'index',
+  tranmicion: 'transmision',
+  tranmision: 'transmision',
+  po: 'por',
+  mi: 'mi'
+};
 
 const defaultConfig = {
   supabaseUrl: 'https://kxhgjamftlniaspagfjo.supabase.co',
@@ -132,12 +143,16 @@ function bindUi() {
 
   elements.messageForm.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const text = elements.messageInput.value.trim();
+    const text = normalizeOutgoingText(elements.messageInput.value);
     if (!text) {
       return;
     }
     elements.messageInput.value = '';
     await enqueueTextMessage(text);
+  });
+
+  elements.messageInput.addEventListener('input', () => {
+    applyTypingCorrections(elements.messageInput);
   });
 
   elements.imageInput.addEventListener('change', async (event) => {
@@ -1167,4 +1182,60 @@ function dbDelete(storeName, key) {
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
+}
+
+function normalizeOutgoingText(text) {
+  return text.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function applyTypingCorrections(input) {
+  const cursor = input.selectionStart ?? input.value.length;
+  const updated = correctLastWordIfNeeded(input.value, cursor);
+  if (!updated.changed) {
+    return;
+  }
+  input.value = updated.text;
+  if (typeof input.setSelectionRange === 'function') {
+    input.setSelectionRange(updated.cursor, updated.cursor);
+  }
+}
+
+function correctLastWordIfNeeded(text, cursor) {
+  const before = text.slice(0, cursor);
+  const after = text.slice(cursor);
+
+  if (!/\s$/.test(before)) {
+    return { changed: false, text, cursor };
+  }
+
+  const match = before.match(/([A-Za-zÁÉÍÓÚáéíóúÑñ]+)\s$/);
+  if (!match) {
+    return { changed: false, text, cursor };
+  }
+
+  const originalWord = match[1];
+  const fixedWord = fixWord(originalWord);
+  if (!fixedWord || fixedWord === originalWord) {
+    return { changed: false, text, cursor };
+  }
+
+  const fixedBefore = `${before.slice(0, before.length - originalWord.length - 1)}${fixedWord} `;
+  const fixedText = fixedBefore + after;
+  const newCursor = fixedBefore.length;
+
+  return { changed: true, text: fixedText, cursor: newCursor };
+}
+
+function fixWord(word) {
+  const lookup = COMMON_TYPO_FIXES[word.toLowerCase()];
+  if (!lookup) {
+    return word;
+  }
+  if (word === word.toUpperCase()) {
+    return lookup.toUpperCase();
+  }
+  if (word[0] === word[0].toUpperCase()) {
+    return lookup[0].toUpperCase() + lookup.slice(1);
+  }
+  return lookup;
 }
