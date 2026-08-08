@@ -90,6 +90,7 @@ const elements = {
   netFabMode: document.getElementById('net-fab-mode'),
   netPanel: document.getElementById('net-panel'),
   syncNow: document.getElementById('sync-now'),
+  hardRefresh: document.getElementById('hard-refresh'),
   forceImages: document.getElementById('force-images'),
   installApp: document.getElementById('install-app'),
   netUser: document.getElementById('net-user'),
@@ -196,6 +197,31 @@ function bindUi() {
     updateSyncSummary();
     setComposerHint('Sincronización manual completada.');
   });
+
+  if (elements.hardRefresh) {
+    elements.hardRefresh.addEventListener('click', async () => {
+      setComposerHint('Actualizando aplicación...');
+      try {
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          for (const registration of registrations) {
+            await registration.update();
+          }
+        }
+
+        if (typeof caches !== 'undefined' && caches.keys) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((key) => caches.delete(key)));
+        }
+
+        setComposerHint('Cache limpiada. Recargando...');
+        window.location.reload();
+      } catch (error) {
+        console.error(error);
+        setComposerHint('No se pudo forzar la actualización automática.');
+      }
+    });
+  }
 
   if (elements.forceImages) {
     elements.forceImages.addEventListener('change', () => {
@@ -572,7 +598,8 @@ function updateProfileFallbackInitial() {
 }
 
 function syncProfileAvatarVisibility() {
-  const hasSrc = Boolean(elements.profileAvatarImg && elements.profileAvatarImg.src);
+  const rawSrc = elements.profileAvatarImg ? (elements.profileAvatarImg.getAttribute('src') || '') : '';
+  const hasSrc = rawSrc.trim().length > 0;
   if (elements.profileAvatarFallback) {
     elements.profileAvatarFallback.style.opacity = hasSrc ? '0' : '1';
   }
