@@ -14,7 +14,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v15';
+const APP_VERSION = '2026-08-08-v19';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -33,6 +33,7 @@ const DAILY_UNLOCK_MS = 24 * 60 * 60 * 1000;
 const imageCache = new Map();
 let deferredInstallPrompt = null;
 let serviceWorkerReloaded = false;
+let keyboardViewportRaf = 0;
 const COMMON_TYPO_FIXES = {
   adme: 'dame',
   corectas: 'correctas',
@@ -95,6 +96,7 @@ const state = {
   historyHasMore: true,
   deviceId: localStorage.getItem(STORAGE_KEYS.deviceId) || '',
   identityByDevice: loadJson(STORAGE_KEYS.identityByDevice, {}),
+  pendingUrlIdentity: '',
   imageDraft: null,
   imageDraftFile: null,
   profileMenuOpen: false,
@@ -139,6 +141,7 @@ const elements = {
   hardRefresh: document.getElementById('hard-refresh'),
   forceImages: document.getElementById('force-images'),
   installApp: document.getElementById('install-app'),
+  shareChat: document.getElementById('share-chat'),
   netUser: document.getElementById('net-user'),
   netRoom: document.getElementById('net-room'),
   netLastSync: document.getElementById('net-last-sync'),
@@ -216,8 +219,10 @@ boot().catch((error) => {
 
 async function boot() {
   bindUi();
+  setupKeyboardViewportHandling();
   await enforceAppVersion();
   ensureDeviceId();
+  applyUrlContext();
   renderEmojiPanel();
   loadProfilePhoto();
   registerPwa();
@@ -240,6 +245,104 @@ async function boot() {
     flushQueues();
   }
   setComposerLocked(false);
+}
+
+function scheduleKeyboardViewportUpdate() {
+  if (keyboardViewportRaf) {
+    window.cancelAnimationFrame(keyboardViewportRaf);
+  }
+  keyboardViewportRaf = window.requestAnimationFrame(() => {
+    keyboardViewportRaf = 0;
+    applyKeyboardViewportOffset();
+  });
+}
+
+function isTypingTargetFocused() {
+  const active = document.activeElement;
+  if (!active) {
+    return false;
+  }
+  if (active === elements.messageInput) {
+    return true;
+  }
+  return Boolean(active instanceof HTMLElement && active.closest('.composer'));
+}
+
+function applyKeyboardViewportOffset() {
+  const root = document.documentElement;
+  const vv = window.visualViewport;
+  if (!vv) {
+    root.style.setProperty('--vk-offset', '0px');
+    return;
+  }
+
+  const keyboardHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  const isOpen = keyboardHeight > 70;
+  const lift = isOpen && isTypingTargetFocused() ? Math.max(0, Math.round(keyboardHeight - 8)) : 0;
+  root.style.setProperty('--vk-offset', `${lift}px`);
+}
+
+function setupKeyboardViewportHandling() {
+  if (!window.visualViewport) {
+    return;
+  }
+  const vv = window.visualViewport;
+  vv.addEventListener('resize', scheduleKeyboardViewportUpdate);
+  vv.addEventListener('scroll', scheduleKeyboardViewportUpdate);
+  window.addEventListener('orientationchange', scheduleKeyboardViewportUpdate);
+  window.addEventListener('resize', scheduleKeyboardViewportUpdate);
+  scheduleKeyboardViewportUpdate();
+}
+
+function getShareUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('session', state.config.sessionId || defaultConfig.sessionId);
+  url.searchParams.set('sender', state.config.senderId || state.identity || defaultConfig.senderId || 'roberto');
+  return url.toString();
+}
+
+function normalizeSessionId(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function applyUrlContext() {
+  const params = new URLSearchParams(window.location.search);
+  const nextSessionId = normalizeSessionId(params.get('session') || params.get('session_id'));
+  const nextSenderId = normalizeIdentity(params.get('sender') || params.get('user') || '');
+  let changed = false;
+
+  if (nextSessionId && nextSessionId !== state.config.sessionId) {
+    state.config.sessionId = nextSessionId;
+    changed = true;
+  }
+
+  if (nextSenderId) {
+    state.pendingUrlIdentity = nextSenderId;
+  } else {
+    state.pendingUrlIdentity = '';
+  }
+
+  if (nextSenderId && nextSenderId !== normalizeIdentity(state.config.senderId || '')) {
+    state.config.senderId = nextSenderId;
+    state.identity = nextSenderId;
+    changed = true;
+  }
+
+  if (changed) {
+    saveJson(STORAGE_KEYS.config, state.config);
+    saveJson(STORAGE_KEYS.identity, state.identity);
+    if (elements.sessionId) {
+      elements.sessionId.value = state.config.sessionId;
+    }
+    if (elements.senderId) {
+      elements.senderId.value = state.config.senderId;
+    }
+  }
 }
 
 async function enforceAppVersion() {
@@ -298,6 +401,38 @@ function bindUi() {
     updateSyncSummary();
     setComposerHint('Sincronización manual completada.');
   });
+
+  if (elements.shareChat) {
+    elements.shareChat.addEventListener('click', async () => {
+      const shareUrl = getShareUrl();
+      const shareTitle = 'Chat privado ligero';
+      const shareText = `Abrir mi chat en la sala ${state.config.sessionId || defaultConfig.sessionId}`;
+
+      try {
+        if (navigator.share) {
+          await navigator.share({
+            title: shareTitle,
+            text: shareText,
+            url: shareUrl
+          });
+          setComposerHint('Enlace compartido.');
+          return;
+        }
+
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(shareUrl);
+          setComposerHint('Enlace copiado al portapapeles.');
+          return;
+        }
+
+        window.prompt('Copia este enlace para compartir el chat:', shareUrl);
+        setComposerHint('Enlace listo para copiar.');
+      } catch (error) {
+        console.error(error);
+        setComposerHint('No se pudo compartir el enlace.');
+      }
+    });
+  }
 
   if (elements.loadMoreHistory) {
     elements.loadMoreHistory.addEventListener('click', async () => {
@@ -496,6 +631,7 @@ function bindUi() {
     if (!state.emojiPanelManuallyClosed) {
       showEmojiPanel();
     }
+    scheduleKeyboardViewportUpdate();
   });
 
   elements.messageInput.addEventListener('blur', () => {
@@ -503,6 +639,7 @@ function bindUi() {
       if (!isEmojiPanelTarget(document.activeElement)) {
         hideEmojiPanel();
       }
+      scheduleKeyboardViewportUpdate();
     }, 0);
   });
 
@@ -785,6 +922,24 @@ function ensureIdentitySelected() {
     const deviceId = ensureDeviceId();
     const byDevice = normalizeIdentity(state.identityByDevice[deviceId] || '');
     const previous = byDevice;
+
+    if (state.pendingUrlIdentity) {
+      const chosen = state.pendingUrlIdentity;
+      state.identity = chosen;
+      state.config.senderId = chosen;
+      state.identityByDevice[deviceId] = chosen;
+      saveJson(STORAGE_KEYS.identity, state.identity);
+      saveJson(STORAGE_KEYS.identityByDevice, state.identityByDevice);
+      saveJson(STORAGE_KEYS.config, state.config);
+      elements.senderId.value = state.config.senderId;
+      elements.identityCustom.value = chosen;
+      state.pendingUrlIdentity = '';
+      setIdentityGateVisible(false);
+      updateActiveUserUi();
+      resolve();
+      return;
+    }
+
     if (previous) {
       state.identity = previous;
       state.config.senderId = previous;
@@ -2688,7 +2843,7 @@ function pruneMissingSessionMessages(remoteLocalIds) {
 }
 
 async function deleteStorageObject(path) {
-  const response = await fetch(`${state.config.supabaseUrl}/storage/v1/object/${state.config.bucketName}/${path}`, {
+  const response = await fetch(`${state.supabaseUrl}/storage/v1/object/${state.config.bucketName}/${path}`, {
     method: 'DELETE',
     headers: supabaseHeaders()
   });
@@ -2739,7 +2894,7 @@ function syncMessageReceipt(message) {
 }
 
 async function uploadFileToStorage(path, blob) {
-  const response = await fetch(`${state.config.supabaseUrl}/storage/v1/object/${state.config.bucketName}/${path}`, {
+  const response = await fetch(`${state.supabaseUrl}/storage/v1/object/${state.config.bucketName}/${path}`, {
     method: 'POST',
     headers: {
       apikey: state.config.supabaseKey,

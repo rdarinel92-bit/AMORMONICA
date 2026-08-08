@@ -1,5 +1,6 @@
 :root {
   color-scheme: dark;
+  --vk-offset: 0px;
   --bg: #0e1116;
   --card: #171b23;
   --fg: #f3f7ff;
@@ -603,7 +604,7 @@ textarea:focus {
 
 .composer-fixed {
   position: sticky;
-  bottom: 12px;
+  bottom: calc(12px + var(--vk-offset));
   z-index: 5;
 }
 
@@ -754,7 +755,7 @@ pre {
   }
 
   .composer-fixed {
-    bottom: 8px;
+    bottom: calc(8px + var(--vk-offset));
   }
 
   .profile-floating {
