@@ -14,7 +14,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v13';
+const APP_VERSION = '2026-08-08-v14';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -51,6 +51,7 @@ const defaultConfig = {
   bucketName: 'chat-files',
   exportEndpoint: 'exportHistory',
   resetEndpoint: 'resetRoomAdmin',
+  resetAdminSecret: '',
   exportEmail: '',
   e2eePassphrase: ''
 };
@@ -157,6 +158,7 @@ const elements = {
   bucketName: document.getElementById('bucket-name'),
   exportEndpoint: document.getElementById('export-endpoint'),
   resetEndpoint: document.getElementById('reset-endpoint'),
+  resetAdminSecret: document.getElementById('reset-admin-secret'),
   exportEmail: document.getElementById('export-email'),
   reloadHistory: document.getElementById('reload-history'),
   resetRoom: document.getElementById('reset-room'),
@@ -418,6 +420,7 @@ function bindUi() {
       bucketName: elements.bucketName.value.trim() || defaultConfig.bucketName,
       exportEndpoint: elements.exportEndpoint.value.trim() || defaultConfig.exportEndpoint,
       resetEndpoint: elements.resetEndpoint.value.trim() || defaultConfig.resetEndpoint,
+      resetAdminSecret: elements.resetAdminSecret?.value.trim() || '',
       exportEmail: elements.exportEmail.value.trim(),
       e2eePassphrase: nextPassphrase
     };
@@ -506,7 +509,8 @@ function bindUi() {
 
     if (!IMAGE_DRAFT_PREVIEW_ENABLED) {
       closImageDraftPanel();
-      state.imageDraftQueue = files.map((file) => ({ file }));
+      const incoming = files.map((file) => ({ file }));
+      state.imageDraftQueue = [...state.imageDraftQueue, ...incoming];
       setComposerHint(`Cola de imágenes: ${state.imageDraftQueue.length}. Enviando...`);
       processImageSendQueue().catch((error) => {
         console.error(error);
@@ -745,6 +749,9 @@ function applyConfigToForm() {
   if (elements.resetEndpoint) {
     elements.resetEndpoint.value = state.config.resetEndpoint || defaultConfig.resetEndpoint;
   }
+  if (elements.resetAdminSecret) {
+    elements.resetAdminSecret.value = state.config.resetAdminSecret || '';
+  }
   elements.exportEmail.value = state.config.exportEmail;
   if (elements.forceImages) {
     elements.forceImages.checked = state.forceImages;
@@ -890,6 +897,7 @@ function applyConfigLockUi() {
     elements.bucketName,
     elements.exportEndpoint,
     elements.resetEndpoint,
+    elements.resetAdminSecret,
     elements.exportEmail,
     elements.saveConfig
   ];
@@ -2416,6 +2424,8 @@ async function resetRoomViaFunction(endpointName) {
     body: JSON.stringify({
       sender: state.config.senderId,
       session_id: state.config.sessionId,
+      bucket_name: state.config.bucketName,
+      admin_secret: state.config.resetAdminSecret || undefined,
       action: 'reset_room'
     })
   });

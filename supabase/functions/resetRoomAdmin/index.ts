@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 type MessageRow = {
   id: string;
+  local_id: string;
   type: string;
   content: string;
   session_id: string;
@@ -15,6 +16,7 @@ type ManifestPayload = {
   chunks?: ManifestChunk[];
   sessionId?: string;
   localId?: string;
+  manifestPath?: string;
 };
 
 const corsHeaders = {
@@ -43,6 +45,10 @@ function extractManifestPath(publicUrl: string, bucketName: string): string | nu
   } catch {
     return null;
   }
+}
+
+function fallbackManifestPath(sessionId: string, localId: string): string {
+  return `manifests/${sessionId}/${localId}.json`;
 }
 
 async function fetchManifest(
@@ -99,6 +105,8 @@ Deno.serve(async (req) => {
     const sender = normalizeIdentity(body?.sender);
     const sessionId = String(body?.session_id || '').trim();
     const bucketName = String(body?.bucket_name || 'chat-files').trim() || 'chat-files';
+    const providedSecret = String(body?.admin_secret || '').trim();
+    const requiredSecret = String(Deno.env.get('RESET_ADMIN_SECRET') || '').trim();
 
     if (!sessionId) {
       return new Response(JSON.stringify({ error: 'session_id is required' }), {
@@ -114,9 +122,16 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (requiredSecret && providedSecret !== requiredSecret) {
+      return new Response(JSON.stringify({ error: 'forbidden: invalid admin secret' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     const { data: rows, error: rowsError } = await admin
       .from('messages')
-      .select('id,type,content,session_id')
+      .select('id,local_id,type,content,session_id')
       .eq('session_id', sessionId);
 
     if (rowsError) {
@@ -135,12 +150,14 @@ Deno.serve(async (req) => {
       }
 
       const manifestPath = extractManifestPath(message.content, bucketName);
-      if (!manifestPath) {
+      const messageLocalId = String(message.local_id || '').trim();
+      const effectiveManifestPath = manifestPath || (messageLocalId ? fallbackManifestPath(sessionId, messageLocalId) : null);
+      if (!effectiveManifestPath) {
         continue;
       }
 
-      storagePaths.add(manifestPath);
-      const manifest = await fetchManifest(admin, bucketName, manifestPath);
+      storagePaths.add(effectiveManifestPath);
+      const manifest = await fetchManifest(admin, bucketName, effectiveManifestPath);
       if (!manifest || !Array.isArray(manifest.chunks)) {
         continue;
       }
