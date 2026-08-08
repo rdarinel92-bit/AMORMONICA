@@ -18,7 +18,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v36';
+const APP_VERSION = '2026-08-08-v37';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -2571,11 +2571,16 @@ async function editLastOwnTextMessage() {
 }
 
 async function deleteOwnTextMessage(message) {
-  if (!message || message.type !== 'text' || !isOwnMessage(message) || !message.local_id) {
+  if (!message || message.type !== 'text' || !isOwnMessage(message)) {
     return;
   }
 
-  const queuedIndex = state.queuedTexts.findIndex((item) => item.local_id === message.local_id);
+  const messageRef = message.local_id || message.id;
+  if (!messageRef) {
+    return;
+  }
+
+  const queuedIndex = state.queuedTexts.findIndex((item) => item.local_id === message.local_id || item.local_id === message.id);
   if (queuedIndex >= 0) {
     state.queuedTexts.splice(queuedIndex, 1);
     persistQueuedTexts();
@@ -2584,10 +2589,10 @@ async function deleteOwnTextMessage(message) {
   let deleteSuccess = false;
   if (state.online && isConfigured()) {
     try {
-      await deleteMessageRemote(message.local_id);
+      await deleteMessageRemoteByRef(message);
       deleteSuccess = true;
     } catch (error) {
-      await updateMessageRemote(message.local_id, {
+      await updateMessageRemoteByRef(message, {
         status: 'error',
         content: '',
         chunks_total: 0,
@@ -2602,8 +2607,8 @@ async function deleteOwnTextMessage(message) {
   }
 
   if (deleteSuccess) {
-    removeLocalMessage(message.local_id);
-    if (state.selectedMessageKey === message.local_id) {
+    removeLocalMessage(messageRef);
+    if (state.selectedMessageKey === messageRef || state.selectedMessageKey === message.local_id || state.selectedMessageKey === message.id) {
       state.selectedMessageKey = '';
     }
     updateQueueSize();
@@ -2611,8 +2616,8 @@ async function deleteOwnTextMessage(message) {
   }
 }
 
-function removeLocalMessage(localId) {
-  const index = state.messages.findIndex((item) => item.local_id === localId);
+function removeLocalMessage(localIdOrId) {
+  const index = state.messages.findIndex((item) => item.local_id === localIdOrId || item.id === localIdOrId);
   if (index < 0) {
     return null;
   }
@@ -2627,12 +2632,17 @@ async function cancelOrRemoveOwnImage(message) {
 }
 
 async function cancelOrRemoveOwnMedia(message) {
-  if (!message || (message.type !== 'image' && message.type !== 'audio') || !isOwnMessage(message) || !message.local_id) {
+  if (!message || (message.type !== 'image' && message.type !== 'audio') || !isOwnMessage(message)) {
+    return;
+  }
+
+  const messageRef = message.local_id || message.id;
+  if (!messageRef) {
     return;
   }
 
   const isPending = message.status === 'pending';
-  state.canceledUploadIds.add(message.local_id);
+  state.canceledUploadIds.add(messageRef);
 
   const retryKey = message.local_id || message.id || message.content;
   const retryTimer = state.imageRetryTimers.get(retryKey);
@@ -2641,7 +2651,9 @@ async function cancelOrRemoveOwnMedia(message) {
     state.imageRetryTimers.delete(retryKey);
   }
 
-  await dbDelete(UPLOAD_STORE, message.local_id);
+  if (message.local_id) {
+    await dbDelete(UPLOAD_STORE, message.local_id);
+  }
 
   if (message.content) {
     await deleteOwnMediaAssets(message).catch((error) => {
@@ -2660,7 +2672,7 @@ async function cancelOrRemoveOwnMedia(message) {
   if (state.online && isConfigured()) {
     try {
       // Use soft delete: mark deleted_at instead of fully removing
-      await updateMessageRemote(message.local_id, {
+      await updateMessageRemoteByRef(message, {
         deleted_at: new Date().toISOString(),
         content: '',
         chunks_total: 0,
@@ -2668,7 +2680,7 @@ async function cancelOrRemoveOwnMedia(message) {
       });
       deleteSuccess = true;
     } catch (error) {
-      await updateMessageRemote(message.local_id, {
+      await updateMessageRemoteByRef(message, {
         status: 'error',
         content: '',
         chunks_total: 0,
@@ -2685,7 +2697,18 @@ async function cancelOrRemoveOwnMedia(message) {
   }
 
   if (deleteSuccess) {
-    removeLocalMessage(message.local_id);
+    if (isPending) {
+      removeLocalMessage(messageRef);
+    } else {
+      upsertMessage({
+        ...message,
+        deleted_at: new Date().toISOString(),
+        content: '',
+        status: 'sent',
+        chunks_total: 0,
+        chunks_sent: 0
+      });
+    }
     updateQueueSize();
     if (message.type === 'audio') {
       setComposerHint(isPending ? 'Envio de audio cancelado.' : 'Audio eliminado del chat.');
@@ -3645,6 +3668,61 @@ async function updateMessageRemote(localId, patch) {
   if (rows[0]) {
     const hydrated = await hydrateIncomingMessage(rows[0]);
     upsertMessage(hydrated);
+  }
+}
+
+function buildMessageRemoteFilter(message) {
+  if (!message || !state.config.sessionId) {
+    return '';
+  }
+  if (message.local_id) {
+    return `local_id=eq.${encodeURIComponent(message.local_id)}&session_id=eq.${encodeURIComponent(state.config.sessionId)}`;
+  }
+  if (message.id) {
+    return `id=eq.${encodeURIComponent(message.id)}&session_id=eq.${encodeURIComponent(state.config.sessionId)}`;
+  }
+  return '';
+}
+
+async function updateMessageRemoteByRef(message, patch) {
+  const filter = buildMessageRemoteFilter(message);
+  if (!filter) {
+    throw new Error('No hay identificador remoto para actualizar el mensaje');
+  }
+  const url = `${state.config.supabaseUrl}/rest/v1/messages?${filter}`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      ...supabaseHeaders(),
+      Prefer: 'return=representation'
+    },
+    body: JSON.stringify(patch)
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  const rows = await response.json();
+  if (rows[0]) {
+    const hydrated = await hydrateIncomingMessage(rows[0]);
+    upsertMessage(hydrated);
+  }
+}
+
+async function deleteMessageRemoteByRef(message) {
+  const filter = buildMessageRemoteFilter(message);
+  if (!filter) {
+    throw new Error('No hay identificador remoto para eliminar el mensaje');
+  }
+  const url = `${state.config.supabaseUrl}/rest/v1/messages?${filter}`;
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      ...supabaseHeaders(),
+      Prefer: 'return=representation'
+    }
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
   }
 }
 
