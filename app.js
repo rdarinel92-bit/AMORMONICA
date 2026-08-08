@@ -51,6 +51,7 @@ const state = {
   realtimeSocket: null,
   heartbeatTimer: null,
   resumeTimer: null,
+  imageRetryTimers: new Map(),
   initialized: false
 };
 
@@ -175,11 +176,24 @@ function bindUi() {
   window.addEventListener('online', () => {
     state.online = true;
     probeConnection().then(flushQueues);
+    refreshHistory({ silent: true });
   });
 
   window.addEventListener('offline', () => {
     state.online = false;
     updateConnectionUi();
+  });
+
+  window.addEventListener('focus', () => {
+    if (state.online && isConfigured()) {
+      refreshHistory({ silent: true });
+    }
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && state.online && isConfigured()) {
+      refreshHistory({ silent: true });
+    }
   });
 }
 
@@ -330,9 +344,24 @@ async function renderImageMessage(message, container, loadingNode) {
     });
     loadingNode.replaceWith(image);
   } catch (error) {
-    loadingNode.textContent = 'No se pudo reconstruir la imagen';
+    loadingNode.textContent = 'Imagen atrasada. Reintentando...';
+    scheduleImageRetry(message);
     console.error(error);
   }
+}
+
+function scheduleImageRetry(message) {
+  const key = message.local_id || message.id || message.content;
+  if (!key || state.imageRetryTimers.has(key)) {
+    return;
+  }
+  const timer = window.setTimeout(() => {
+    state.imageRetryTimers.delete(key);
+    if (state.online && isConfigured()) {
+      refreshHistory({ silent: true });
+    }
+  }, 4500);
+  state.imageRetryTimers.set(key, timer);
 }
 
 async function resolveImageSource(content) {
@@ -630,7 +659,8 @@ async function flushQueues() {
   updateQueueSize();
 }
 
-async function refreshHistory() {
+async function refreshHistory(options = {}) {
+  const { silent = false } = options;
   if (!isConfigured()) {
     return;
   }
@@ -643,10 +673,14 @@ async function refreshHistory() {
       upsertMessage(message);
     }
     persistKnownRemoteIds();
-    setComposerHint('Historial cargado.');
+    if (!silent) {
+      setComposerHint('Historial cargado.');
+    }
   } catch (error) {
     console.error(error);
-    setComposerHint('No se pudo cargar el historial.');
+    if (!silent) {
+      setComposerHint('No se pudo cargar el historial.');
+    }
   }
 }
 
@@ -831,6 +865,7 @@ function startConnectionMonitoring() {
     await probeConnection();
     if (state.online) {
       flushQueues();
+      refreshHistory({ silent: true });
     }
   }, 20000);
 }
