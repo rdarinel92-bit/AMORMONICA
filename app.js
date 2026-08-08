@@ -5,6 +5,8 @@ const STORAGE_KEYS = {
   knownRemoteIds: 'chat-lite-known-remote-ids',
   configLocked: 'chat-lite-config-locked',
   identity: 'chat-lite-identity',
+  deviceId: 'chat-lite-device-id',
+  identityByDevice: 'chat-lite-identity-by-device',
   autoSavedImages: 'chat-lite-auto-saved-images',
   forceImages: 'chat-lite-force-images',
   e2eeUnlockUntil: 'chat-lite-e2ee-unlock-until',
@@ -12,7 +14,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v8';
+const APP_VERSION = '2026-08-08-v9';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -23,6 +25,7 @@ const HEARTBEAT_MS = 25000;
 const PROBE_HISTORY = 8;
 const IMAGE_UPLOAD_MAX_RETRIES = 4;
 const IMAGE_UPLOAD_RETRY_BASE_MS = 1500;
+const IMAGE_DRAFT_PREVIEW_ENABLED = false;
 const ENC_PREFIX = 'enc:v1:';
 const DAILY_UNLOCK_MS = 24 * 60 * 60 * 1000;
 const imageCache = new Map();
@@ -84,6 +87,8 @@ const state = {
   lastSyncAt: null,
   pendingUploadsCount: 0,
   initialized: false,
+  deviceId: localStorage.getItem(STORAGE_KEYS.deviceId) || '',
+  identityByDevice: loadJson(STORAGE_KEYS.identityByDevice, {}),
   imageDraft: null,
   imageDraftFile: null,
   profileMenuOpen: false,
@@ -203,6 +208,7 @@ boot().catch((error) => {
 async function boot() {
   bindUi();
   await enforceAppVersion();
+  ensureDeviceId();
   renderEmojiPanel();
   loadProfilePhoto();
   registerPwa();
@@ -489,6 +495,18 @@ function bindUi() {
     if (files.length === 0) {
       return;
     }
+
+    if (!IMAGE_DRAFT_PREVIEW_ENABLED) {
+      closImageDraftPanel();
+      state.imageDraftQueue = files.map((file) => ({ file }));
+      setComposerHint(`Cola de imágenes: ${state.imageDraftQueue.length}. Enviando...`);
+      processImageSendQueue().catch((error) => {
+        console.error(error);
+        setComposerHint('No se pudo enviar la cola de imágenes.');
+      });
+      return;
+    }
+
     await showImageDraftPanel(files[0], files.slice(1));
   });
 
@@ -726,12 +744,16 @@ function applyConfigToForm() {
 
 function ensureIdentitySelected() {
   return new Promise((resolve) => {
-    const previous = normalizeIdentity(state.identity || state.config.senderId || '');
+    const deviceId = ensureDeviceId();
+    const byDevice = normalizeIdentity(state.identityByDevice[deviceId] || '');
+    const previous = byDevice || normalizeIdentity(state.identity || '');
     if (previous) {
       state.identity = previous;
       state.config.senderId = previous;
       saveJson(STORAGE_KEYS.identity, state.identity);
       saveJson(STORAGE_KEYS.config, state.config);
+      state.identityByDevice[deviceId] = previous;
+      saveJson(STORAGE_KEYS.identityByDevice, state.identityByDevice);
       elements.senderId.value = state.config.senderId;
       elements.identityCustom.value = previous;
       setIdentityGateVisible(false);
@@ -751,7 +773,9 @@ function ensureIdentitySelected() {
 
       state.identity = name;
       state.config.senderId = name;
+      state.identityByDevice[deviceId] = name;
       saveJson(STORAGE_KEYS.identity, state.identity);
+      saveJson(STORAGE_KEYS.identityByDevice, state.identityByDevice);
       saveJson(STORAGE_KEYS.config, state.config);
       elements.senderId.value = state.config.senderId;
       setIdentityGateVisible(false);
@@ -3211,4 +3235,15 @@ function clearProfilePhoto() {
   }
   syncProfileAvatarVisibility();
   setComposerHint('Imagen de perfil eliminada.');
+}
+
+function ensureDeviceId() {
+  if (state.deviceId) {
+    return state.deviceId;
+  }
+
+  const nextId = createId('device');
+  state.deviceId = nextId;
+  localStorage.setItem(STORAGE_KEYS.deviceId, nextId);
+  return nextId;
 }
