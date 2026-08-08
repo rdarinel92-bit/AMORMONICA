@@ -5,7 +5,8 @@ const STORAGE_KEYS = {
   knownRemoteIds: 'chat-lite-known-remote-ids',
   configLocked: 'chat-lite-config-locked',
   identity: 'chat-lite-identity',
-  autoSavedImages: 'chat-lite-auto-saved-images'
+  autoSavedImages: 'chat-lite-auto-saved-images',
+  forceImages: 'chat-lite-force-images'
 };
 
 const DB_NAME = 'chat-lite-db';
@@ -60,6 +61,7 @@ const state = {
   resumeTimer: null,
   imageRetryTimers: new Map(),
   autoSavedImages: new Set(loadJson(STORAGE_KEYS.autoSavedImages, [])),
+  forceImages: loadJson(STORAGE_KEYS.forceImages, false),
   e2eeKeyPromise: null,
   e2eeKeyFingerprint: '',
   lastSyncAt: null,
@@ -71,6 +73,7 @@ const elements = {
   netFabMode: document.getElementById('net-fab-mode'),
   netPanel: document.getElementById('net-panel'),
   syncNow: document.getElementById('sync-now'),
+  forceImages: document.getElementById('force-images'),
   netUser: document.getElementById('net-user'),
   netRoom: document.getElementById('net-room'),
   netLastSync: document.getElementById('net-last-sync'),
@@ -159,6 +162,16 @@ function bindUi() {
     updateSyncSummary();
     setComposerHint('Sincronizacion manual completada.');
   });
+
+  if (elements.forceImages) {
+    elements.forceImages.addEventListener('change', () => {
+      state.forceImages = elements.forceImages.checked;
+      saveJson(STORAGE_KEYS.forceImages, state.forceImages);
+      setComposerHint(state.forceImages
+        ? 'Forzar imagen activado. Se permitiran imagenes aun con red dificil.'
+        : 'Forzar imagen desactivado. Se prioriza texto en red dificil.');
+    });
+  }
 
   document.addEventListener('click', (event) => {
     const target = event.target;
@@ -293,6 +306,9 @@ function applyConfigToForm() {
   elements.bucketName.value = state.config.bucketName;
   elements.exportEndpoint.value = state.config.exportEndpoint;
   elements.exportEmail.value = state.config.exportEmail;
+  if (elements.forceImages) {
+    elements.forceImages.checked = state.forceImages;
+  }
   applyConfigLockUi();
   updateActiveUserUi();
 }
@@ -723,6 +739,10 @@ async function enqueueTextMessage(text) {
 async function enqueueImageMessage(file) {
   if (!isConfigured()) {
     setComposerHint('Configura Supabase antes de enviar imagenes.');
+    return;
+  }
+  if (state.mode === 'Ultra-ligero' && !state.forceImages) {
+    setComposerHint('Red muy lenta: la imagen quedo bloqueada. Activa Forzar imagen si la necesitas.');
     return;
   }
   const targetKb = getTargetImageKb();

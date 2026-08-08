@@ -35,6 +35,12 @@
 
     <button id="net-fab" class="net-fab" type="button" aria-controls="net-panel" aria-expanded="false">Red: <span id="net-fab-mode">--</span></button>
     <section id="net-panel" class="net-panel" aria-label="Estado de conexion" hidden>
+      <div class="net-actions net-toggle-row">
+        <label class="toggle-chip">
+          <input id="force-images" type="checkbox">
+          <span>Forzar imagen</span>
+        </label>
+      </div>
       <div class="net-summary">
         <div><span class="label">Usuario</span><strong id="net-user">-</strong></div>
         <div><span class="label">Sala</span><strong id="net-room">-</strong></div>
@@ -113,8 +119,8 @@
           <button id="save-config" class="button" type="submit">Guardar</button>
           <button id="toggle-config-lock" class="button ghost" type="button">Desbloquear config</button>
           <button id="reload-history" class="button ghost" type="button">Recargar historial</button>
-          <button id="export-history" class="button ghost" type="button">Exportar historial</button>
-          <button id="download-transcript" class="button ghost" type="button">Descargar TXT</button>
+          <button id="export-history" class="button ghost button-icon" type="button"><span class="icon">⇪</span><span>Exportar historial</span></button>
+          <button id="download-transcript" class="button ghost button-icon" type="button"><span class="icon">TXT</span><span>Descargar TXT</span></button>
         </div>
       </form>
 
@@ -126,12 +132,12 @@
 
     <section id="chat-log" class="chat-log" aria-live="polite" aria-label="Mensajes"></section>
 
-    <section class="composer">
+    <section class="composer composer-fixed">
       <form id="message-form" class="composer-form">
         <textarea id="message-input" rows="2" maxlength="2000" placeholder="Escribe un mensaje" spellcheck="true" autocapitalize="sentences" autocomplete="on" lang="es"></textarea>
         <div class="composer-actions">
-          <label class="button ghost file-button" for="image-input">Imagen</label>
-          <button id="send-button" class="button" type="submit">Enviar</button>
+          <label class="button ghost file-button button-icon" for="image-input"><span class="icon">＋</span><span>Imagen</span></label>
+          <button id="send-button" class="button button-icon" type="submit"><span class="icon">➤</span><span>Enviar</span></button>
         </div>
       </form>
       <input id="image-input" type="file" accept="image/*" hidden>

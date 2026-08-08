@@ -150,6 +150,25 @@ button {
   margin-bottom: 8px;
 }
 
+.net-toggle-row {
+  justify-content: flex-start;
+}
+
+.toggle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.toggle-chip input {
+  width: auto;
+  margin: 0;
+}
+
 .status-card,
 .setup-panel,
 .message,
