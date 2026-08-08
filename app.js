@@ -18,6 +18,8 @@ const CACHE_STORE = 'cache';
 const CHUNK_SIZE = 5 * 1024;
 const HEARTBEAT_MS = 25000;
 const PROBE_HISTORY = 8;
+const IMAGE_UPLOAD_MAX_RETRIES = 4;
+const IMAGE_UPLOAD_RETRY_BASE_MS = 1500;
 const ENC_PREFIX = 'enc:v1:';
 const DAILY_UNLOCK_MS = 24 * 60 * 60 * 1000;
 const imageCache = new Map();
@@ -65,7 +67,11 @@ const state = {
   heartbeatTimer: null,
   resumeTimer: null,
   imageRetryTimers: new Map(),
+  uploadRetryTimers: new Map(),
   canceledUploadIds: new Set(),
+  imageDraftQueue: [],
+  activeUploadLocalId: '',
+  uploadPumpRunning: false,
   autoSavedImages: new Set(loadJson(STORAGE_KEYS.autoSavedImages, [])),
   forceImages: loadJson(STORAGE_KEYS.forceImages, false),
   e2eeUnlockUntil: loadJson(STORAGE_KEYS.e2eeUnlockUntil, 0),
@@ -73,6 +79,7 @@ const state = {
   e2eeKeyPromise: null,
   e2eeKeyFingerprint: '',
   lastSyncAt: null,
+  pendingUploadsCount: 0,
   initialized: false,
   imageDraft: null,
   imageDraftFile: null
@@ -131,6 +138,7 @@ const elements = {
   draftMode: document.getElementById('draft-mode'),
   draftEstimate: document.getElementById('draft-estimate'),
   draftSendButton: document.getElementById('draft-send'),
+  draftQueueCount: document.getElementById('draft-queue-count'),
   draftChangeButton: document.getElementById('draft-change'),
   draftDiscardButton: document.getElementById('draft-discard'),
   profilePhotoInput: document.getElementById('profile-photo-input'),
@@ -334,19 +342,32 @@ function bindUi() {
   });
 
   elements.imageInput.addEventListener('change', async (event) => {
-    const file = event.target.files && event.target.files[0];
+    const files = Array.from(event.target.files || []);
     event.target.value = '';
-    if (!file) {
+    if (files.length === 0) {
       return;
     }
-    await showImageDrafPanel(file);
+    await showImageDraftPanel(files[0], files.slice(1));
   });
 
   elements.draftSendButton.addEventListener('click', async () => {
-    if (state.imageDraftFile) {
-      await enqueueImageMessage(state.imageDraftFile);
-      closImageDraftPanel();
+    if (!state.imageDraftFile && (!state.imageDraftQueue || state.imageDraftQueue.length === 0)) {
+      return;
     }
+
+    if (state.imageDraftFile) {
+      state.imageDraftQueue.unshift({
+        file: state.imageDraftFile,
+        prepared: state.imageDraft
+      });
+    }
+
+    closImageDraftPanel();
+    setComposerHint(`Cola de imágenes: ${state.imageDraftQueue.length}. Iniciando envío secuencial...`);
+    processImageSendQueue().catch((error) => {
+      console.error(error);
+      setComposerHint('No se pudo procesar la cola de imágenes completa.');
+    });
   });
 
   elements.draftChangeButton.addEventListener('click', () => {
@@ -355,7 +376,9 @@ function bindUi() {
   });
 
   elements.draftDiscardButton.addEventListener('click', () => {
+    state.imageDraftQueue = [];
     closImageDraftPanel();
+    setComposerHint('Borrador de imagen descartado.');
   });
 
   elements.profilePhotoInput.addEventListener('change', async (event) => {
@@ -377,9 +400,10 @@ function bindUi() {
 
   window.addEventListener('online', () => {
     state.online = true;
-    probeConnection().then(flushQueues);
-    refreshHistory({ silent: true });
-    updateSyncSummary();
+    handleReconnect().catch((error) => {
+      console.error(error);
+      setComposerHint('Reconectado con incidencias. Reintentando sincronización.');
+    });
   });
 
   window.addEventListener('offline', () => {
@@ -389,17 +413,40 @@ function bindUi() {
 
   window.addEventListener('focus', () => {
     if (state.online && isConfigured()) {
-      refreshHistory({ silent: true });
-      updateSyncSummary();
+      handleReconnect({ soft: true }).catch((error) => console.error(error));
     }
   });
 
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && state.online && isConfigured()) {
-      refreshHistory({ silent: true });
-      updateSyncSummary();
+      handleReconnect({ soft: true }).catch((error) => console.error(error));
     }
   });
+}
+
+async function handleReconnect(options = {}) {
+  const { soft = false } = options;
+  if (!isConfigured()) {
+    return;
+  }
+
+  await probeConnection();
+  if (!state.online) {
+    return;
+  }
+
+  if (!state.realtimeSocket || state.realtimeSocket.readyState === WebSocket.CLOSED) {
+    connectRealtime();
+  }
+
+  await refreshHistory({ silent: true });
+  await flushQueues();
+  await refreshHistory({ silent: true });
+  updateSyncSummary();
+
+  if (!soft) {
+    setComposerHint('Reconexión completa: historial y cola sincronizados.');
+  }
 }
 
 async function registerPwa() {
@@ -602,16 +649,24 @@ function persistKnownRemoteIds() {
 
 async function saveProfilePhoto(file) {
   try {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target.result;
-      localStorage.setItem(STORAGE_KEYS.profilePhoto, dataUrl);
-      elements.profileAvatarImg.src = dataUrl;
-      elements.profileAvatarImg.style.opacity = '1';
-    };
-    reader.readAsDataURL(file);
+    if (!file || !file.type || !file.type.startsWith('image/')) {
+      setComposerHint('Selecciona una imagen válida para el perfil.');
+      return;
+    }
+
+    // Show preview immediately so the UI feels instant.
+    const instantPreviewUrl = URL.createObjectURL(file);
+    elements.profileAvatarImg.src = instantPreviewUrl;
+    elements.profileAvatarImg.style.opacity = '1';
+
+    const optimizedDataUrl = await optimizeProfilePhoto(file);
+    localStorage.setItem(STORAGE_KEYS.profilePhoto, optimizedDataUrl);
+    elements.profileAvatarImg.src = optimizedDataUrl;
+    setComposerHint('Foto de perfil actualizada.');
+    window.setTimeout(() => URL.revokeObjectURL(instantPreviewUrl), 1000);
   } catch (error) {
     console.error(error);
+    setComposerHint('No se pudo actualizar la foto de perfil.');
   }
 }
 
@@ -625,6 +680,34 @@ function loadProfilePhoto() {
   } catch (error) {
     console.error(error);
   }
+}
+
+async function optimizeProfilePhoto(file) {
+  const MAX_SIDE = 256;
+  const TARGET_QUALITY = 0.78;
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d', { alpha: false });
+  context.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  const jpegBlob = await canvasToJpeg(canvas, TARGET_QUALITY);
+  return blobToDataUrl(jpegBlob);
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('No se pudo leer la imagen del perfil'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 function persistAutoSavedImages() {
@@ -870,6 +953,25 @@ async function renderImageMessage(message, container, loadingNode, selected = fa
     const frame = document.createElement('div');
     frame.className = 'image-frame';
     frame.appendChild(image);
+
+    if (isOwnMessage(message) && message.status === 'pending' && Number(message.chunks_total || 0) > 0) {
+      const progressWrap = document.createElement('div');
+      progressWrap.className = 'upload-progress';
+      const progressBar = document.createElement('div');
+      progressBar.className = 'upload-progress-bar';
+      const sent = Number(message.chunks_sent || 0);
+      const total = Math.max(1, Number(message.chunks_total || 1));
+      const percent = Math.max(0, Math.min(100, Math.round((sent / total) * 100)));
+      progressBar.style.width = `${percent}%`;
+      progressWrap.appendChild(progressBar);
+      frame.appendChild(progressWrap);
+
+      const progressText = document.createElement('small');
+      progressText.className = 'upload-progress-text';
+      progressText.textContent = `Subiendo ${sent}/${total} (${percent}%)`;
+      frame.appendChild(progressText);
+    }
+
     frame.appendChild(actions);
 
     loadingNode.replaceWith(frame);
@@ -1196,7 +1298,7 @@ async function cancelOrRemoveOwnImage(message) {
   }
 }
 
-async function showImageDrafPanel(file) {
+async function showImageDraftPanel(file, extraFiles = []) {
   if (!isConfigured()) {
     setComposerHint('Configura Supabase antes de enviar imágenes.');
     return;
@@ -1218,6 +1320,7 @@ async function showImageDrafPanel(file) {
     const chunks = await buildChunkManifest(compressed, localId);
 
     state.imageDraftFile = file;
+    state.imageDraftQueue = extraFiles.map((nextFile) => ({ file: nextFile }));
     state.imageDraft = {
       compressed,
       previewUrl,
@@ -1236,13 +1339,82 @@ async function showImageDrafPanel(file) {
 
     const estimatedSeconds = estimateUploadTime(compressed.size);
     elements.draftEstimate.textContent = estimatedSeconds > 0 ? `~${estimatedSeconds}s` : 'Bajo demanda';
+    if (elements.draftQueueCount) {
+      elements.draftQueueCount.textContent = String(state.imageDraftQueue.length);
+    }
 
     elements.imageDraftPanel.hidden = false;
-    setComposerHint('Listo para enviar. Toca "Enviar imagen" para comenzar el upload.');
+    if (extraFiles.length > 0) {
+      setComposerHint(`Listo para enviar. Hay ${extraFiles.length + 1} imágenes en cola.`);
+    } else {
+      setComposerHint('Listo para enviar. Toca "Enviar imagen" para comenzar el upload.');
+    }
   } catch (error) {
     console.error(error);
     setComposerHint('Error al procesar imagen. Intenta otra.');
   }
+}
+
+const showImageDrafPanel = showImageDraftPanel;
+
+async function processImageSendQueue() {
+  if (state.uploadPumpRunning) {
+    return;
+  }
+
+  state.uploadPumpRunning = true;
+  try {
+    const total = state.imageDraftQueue.length;
+    let processed = 0;
+    while (state.imageDraftQueue.length > 0) {
+      const next = state.imageDraftQueue.shift();
+      if (!next || !next.file) {
+        continue;
+      }
+
+      if (next.prepared) {
+        state.imageDraft = next.prepared;
+        state.imageDraftFile = next.file;
+      } else {
+        state.imageDraft = null;
+        state.imageDraftFile = null;
+      }
+
+      const localId = await enqueueImageMessage(next.file);
+      if (localId) {
+        await waitForImageUploadSettle(localId);
+      }
+
+      processed += 1;
+      if (total > 1 && processed < total) {
+        setComposerHint(`Cola de imágenes: ${processed}/${total} completadas...`);
+      }
+    }
+  } finally {
+    state.uploadPumpRunning = false;
+    state.imageDraft = null;
+    state.imageDraftFile = null;
+  }
+}
+
+async function waitForImageUploadSettle(localId, timeoutMs = 240000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const message = state.messages.find((item) => item.local_id === localId);
+    if (!message) {
+      return 'removed';
+    }
+
+    if (message.status === 'sent' || message.status === 'read' || message.status === 'delivered') {
+      return message.status;
+    }
+    if (message.status === 'error') {
+      return 'error';
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, 280));
+  }
+  return 'timeout';
 }
 
 function closImageDraftPanel() {
@@ -1286,11 +1458,11 @@ function estimateUploadTime(sizeBytes) {
 async function enqueueImageMessage(file) {
   if (!isConfigured()) {
     setComposerHint('Configura Supabase antes de enviar imágenes.');
-    return;
+    return '';
   }
   if (state.mode === 'Ultra-ligero' && !state.forceImages) {
     setComposerHint('Red muy lenta: la imagen quedó bloqueada. Activa Forzar imagen si la necesitas.');
-    return;
+    return '';
   }
 
   let compressed;
@@ -1349,8 +1521,10 @@ async function enqueueImageMessage(file) {
   updateQueueSize();
   processUploadJob(uploadJob).catch((error) => {
     console.error(error);
-    markMessageError(localId);
+    scheduleUploadRetry(uploadJob, error).catch((nestedError) => console.error(nestedError));
   });
+
+  return localId;
 }
 
 async function insertPendingImageMessage(message, uploadJob) {
@@ -1388,6 +1562,7 @@ async function processUploadJob(job) {
     return;
   }
   if (state.canceledUploadIds.has(job.id)) {
+    clearUploadRetryTimer(job.id);
     await dbDelete(UPLOAD_STORE, job.id);
     return;
   }
@@ -1397,6 +1572,7 @@ async function processUploadJob(job) {
   }
   for (const chunk of liveJob.chunks) {
     if (state.canceledUploadIds.has(liveJob.id)) {
+      clearUploadRetryTimer(liveJob.id);
       await dbDelete(UPLOAD_STORE, liveJob.id);
       return;
     }
@@ -1440,11 +1616,13 @@ async function processUploadJob(job) {
   await uploadFileToStorage(manifestPath, manifestBlob);
 
   if (state.canceledUploadIds.has(liveJob.id)) {
+    clearUploadRetryTimer(liveJob.id);
     await dbDelete(UPLOAD_STORE, liveJob.id);
     return;
   }
   const manifestUrl = publicStorageUrl(manifestPath);
   await finalizeImageMessage(liveJob.id, manifestUrl, liveJob.chunks.length);
+  clearUploadRetryTimer(liveJob.id);
   await dbDelete(UPLOAD_STORE, liveJob.id);
   state.canceledUploadIds.delete(liveJob.id);
   updateQueueSize();
@@ -1527,6 +1705,69 @@ function markMessageError(localId) {
   }
 }
 
+function markMessagePending(localId) {
+  const message = state.messages.find((item) => item.local_id === localId);
+  if (message) {
+    upsertMessage({ ...message, status: 'pending' });
+  }
+}
+
+function clearUploadRetryTimer(jobId) {
+  const timer = state.uploadRetryTimers.get(jobId);
+  if (!timer) {
+    return;
+  }
+  window.clearTimeout(timer);
+  state.uploadRetryTimers.delete(jobId);
+}
+
+async function scheduleUploadRetry(jobOrId, sourceError) {
+  const jobId = typeof jobOrId === 'string' ? jobOrId : jobOrId.id;
+  if (!jobId || state.canceledUploadIds.has(jobId)) {
+    return;
+  }
+  if (state.uploadRetryTimers.has(jobId)) {
+    return;
+  }
+
+  const liveJob = await dbGet(UPLOAD_STORE, jobId);
+  if (!liveJob) {
+    return;
+  }
+
+  const retryCount = Number(liveJob.retryCount || 0);
+  if (retryCount >= IMAGE_UPLOAD_MAX_RETRIES) {
+    clearUploadRetryTimer(jobId);
+    markMessageError(jobId);
+    setComposerHint('No se pudo subir la imagen tras varios intentos. Puedes reenviarla.');
+    return;
+  }
+
+  const nextRetryCount = retryCount + 1;
+  liveJob.retryCount = nextRetryCount;
+  await dbPut(UPLOAD_STORE, liveJob);
+  markMessagePending(jobId);
+
+  const waitMs = IMAGE_UPLOAD_RETRY_BASE_MS * (2 ** (nextRetryCount - 1));
+  const timer = window.setTimeout(async () => {
+    state.uploadRetryTimers.delete(jobId);
+    if (!state.online || !isConfigured() || state.canceledUploadIds.has(jobId)) {
+      return;
+    }
+    const latest = await dbGet(UPLOAD_STORE, jobId);
+    if (!latest) {
+      return;
+    }
+    processUploadJob(latest).catch((error) => {
+      console.error(error);
+      scheduleUploadRetry(jobId, error).catch((nestedError) => console.error(nestedError));
+    });
+  }, waitMs);
+
+  state.uploadRetryTimers.set(jobId, timer);
+  setComposerHint(`Reintentando imagen en ${Math.ceil(waitMs / 1000)}s...`);
+}
+
 async function flushQueues() {
   if (!state.online || !isConfigured()) {
     updateQueueSize();
@@ -1565,7 +1806,7 @@ async function flushQueues() {
     }
     processUploadJob(job).catch((error) => {
       console.error(error);
-      markMessageError(job.id);
+      scheduleUploadRetry(job, error).catch((nestedError) => console.error(nestedError));
     });
   }
   updateQueueSize();
@@ -2016,9 +2257,11 @@ async function restoreUploadJobs() {
 
 function updateQueueSize() {
   dbGetAll(UPLOAD_STORE).then((jobs) => {
+    state.pendingUploadsCount = jobs.length;
     elements.queueSize.textContent = String(state.queuedTexts.length + jobs.length);
     updateSyncSummary();
   }).catch(() => {
+    state.pendingUploadsCount = 0;
     elements.queueSize.textContent = String(state.queuedTexts.length);
     updateSyncSummary();
   });
@@ -2028,7 +2271,7 @@ function updateSyncSummary() {
   elements.netUser.textContent = formatUserName(state.config.senderId || state.identity);
   elements.netRoom.textContent = state.config.sessionId || '-';
   elements.netLastSync.textContent = state.lastSyncAt ? formatDate(state.lastSyncAt) : 'nunca';
-  elements.netPending.textContent = String(state.queuedTexts.length + (state.db ? 0 : 0));
+  elements.netPending.textContent = String(state.queuedTexts.length + state.pendingUploadsCount);
 }
 
 function getTargetImageKb() {

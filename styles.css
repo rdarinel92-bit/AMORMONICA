@@ -464,6 +464,37 @@ textarea:focus {
   gap: 8px;
 }
 
+.upload-progress {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
+}
+
+.upload-progress-bar {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #2ca7ff 0%, #7de3ff 100%);
+  transition: width 0.28s ease;
+  animation: uploadPulse 1s ease-in-out infinite alternate;
+}
+
+.upload-progress-text {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+@keyframes uploadPulse {
+  from {
+    filter: brightness(0.92);
+  }
+  to {
+    filter: brightness(1.1);
+  }
+}
+
 .image-actions {
   display: flex;
   justify-content: flex-start;
@@ -627,6 +658,18 @@ pre {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.draft-queue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--soft);
+  font-size: 0.82rem;
+  color: var(--muted);
 }
 
 .draft-actions button {

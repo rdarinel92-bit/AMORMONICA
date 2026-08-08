@@ -170,6 +170,7 @@
         </div>
       </div>
       <div class="draft-actions">
+        <span class="draft-queue" aria-live="polite">En cola: <strong id="draft-queue-count">0</strong></span>
         <button id="draft-send" class="button" type="button">✓ Enviar imagen</button>
         <button id="draft-change" class="button ghost" type="button">🔄 Cambiar</button>
         <button id="draft-discard" class="button ghost" type="button">✕ Descartar</button>
@@ -184,7 +185,7 @@
           <button id="send-button" class="button button-icon" type="submit"><span class="icon">➤</span><span>Enviar</span></button>
         </div>
       </form>
-      <input id="image-input" type="file" accept="image/*" hidden>
+      <input id="image-input" type="file" accept="image/*" multiple hidden>
       <p id="composer-hint" class="hint">Sin audio por defecto. El modo de conexión ajusta la compresión automáticamente.</p>
     </section>
   </main>
