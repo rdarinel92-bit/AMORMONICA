@@ -9,12 +9,14 @@ const STORAGE_KEYS = {
   identityByDevice: 'chat-lite-identity-by-device',
   autoSavedImages: 'chat-lite-auto-saved-images',
   forceImages: 'chat-lite-force-images',
+  dataSaver: 'chat-lite-data-saver',
+  haptics: 'chat-lite-haptics',
   e2eeUnlockUntil: 'chat-lite-e2ee-unlock-until',
   profilePhoto: 'chat-lite-profile-photo',
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v19';
+const APP_VERSION = '2026-08-08-v20';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -85,6 +87,8 @@ const state = {
   uploadPumpRunning: false,
   autoSavedImages: new Set(loadJson(STORAGE_KEYS.autoSavedImages, [])),
   forceImages: loadJson(STORAGE_KEYS.forceImages, false),
+  dataSaver: loadJson(STORAGE_KEYS.dataSaver, true),
+  haptics: loadJson(STORAGE_KEYS.haptics, false),
   e2eeUnlockUntil: loadJson(STORAGE_KEYS.e2eeUnlockUntil, 0),
   selectedMessageKey: '',
   e2eeKeyPromise: null,
@@ -140,6 +144,8 @@ const elements = {
   syncNow: document.getElementById('sync-now'),
   hardRefresh: document.getElementById('hard-refresh'),
   forceImages: document.getElementById('force-images'),
+  dataSaver: document.getElementById('data-saver'),
+  haptics: document.getElementById('haptics'),
   installApp: document.getElementById('install-app'),
   shareChat: document.getElementById('share-chat'),
   netUser: document.getElementById('net-user'),
@@ -177,6 +183,7 @@ const elements = {
   messageForm: document.getElementById('message-form'),
   messageInput: document.getElementById('message-input'),
   imageInput: document.getElementById('image-input'),
+  sendLocation: document.getElementById('send-location'),
   connectionMode: document.getElementById('connection-mode'),
   connectionSpeed: document.getElementById('connection-speed'),
   connectionLatency: document.getElementById('connection-latency'),
@@ -478,6 +485,55 @@ function bindUi() {
       setComposerHint(state.forceImages
         ? 'Forzar imagen activado. Se permitirán imágenes incluso con red difícil.'
         : 'Forzar imagen desactivado. Se prioriza texto con red difícil.');
+    });
+  }
+
+  if (elements.dataSaver) {
+    elements.dataSaver.addEventListener('change', () => {
+      state.dataSaver = Boolean(elements.dataSaver.checked);
+      saveJson(STORAGE_KEYS.dataSaver, state.dataSaver);
+      setComposerHint(state.dataSaver
+        ? 'Ahorro de datos activado (modo Cuba).'
+        : 'Ahorro de datos desactivado.');
+      updateConnectionUi();
+    });
+  }
+
+  if (elements.haptics) {
+    elements.haptics.addEventListener('change', () => {
+      state.haptics = Boolean(elements.haptics.checked);
+      saveJson(STORAGE_KEYS.haptics, state.haptics);
+      if (state.haptics && navigator.vibrate) {
+        navigator.vibrate(14);
+      }
+      setComposerHint(state.haptics ? 'Vibración activada.' : 'Vibración desactivada.');
+    });
+  }
+
+  if (elements.sendLocation) {
+    elements.sendLocation.addEventListener('click', async () => {
+      if (!navigator.geolocation) {
+        setComposerHint('Ubicación no disponible en este navegador.');
+        return;
+      }
+
+      setComposerHint('Obteniendo ubicación...');
+      try {
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: false,
+            timeout: 6000,
+            maximumAge: 120000
+          });
+        });
+        const lat = Number(position.coords.latitude).toFixed(5);
+        const lon = Number(position.coords.longitude).toFixed(5);
+        const mapUrl = `https://maps.google.com/?q=${lat},${lon}`;
+        await enqueueTextMessage(`Ubicación aprox: ${lat}, ${lon} ${mapUrl}`);
+      } catch (error) {
+        console.error(error);
+        setComposerHint('No se pudo obtener la ubicación.');
+      }
     });
   }
 
@@ -913,6 +969,12 @@ function applyConfigToForm() {
   if (elements.forceImages) {
     elements.forceImages.checked = state.forceImages;
   }
+  if (elements.dataSaver) {
+    elements.dataSaver.checked = state.dataSaver;
+  }
+  if (elements.haptics) {
+    elements.haptics.checked = state.haptics;
+  }
   applyConfigLockUi();
   updateActiveUserUi();
 }
@@ -1087,6 +1149,12 @@ function isConfigured() {
 }
 
 function setComposerHint(text) {
+  if (state.haptics && navigator.vibrate) {
+    const hint = String(text || '').toLowerCase();
+    if (hint.includes('error') || hint.includes('no se pudo')) {
+      navigator.vibrate([20, 24, 20]);
+    }
+  }
   elements.composerHint.textContent = text;
 }
 
@@ -3099,6 +3167,9 @@ function selectConnectionMode() {
   if (!isConfigured()) {
     return 'Sin configurar';
   }
+  if (state.dataSaver) {
+    return 'Ahorro-Cuba';
+  }
   if (!state.online || state.kbps < 80 || state.latency > 2000 || state.stability < 0.6 || state.loss > 0.35) {
     return 'Ultra-ligero';
   }
@@ -3167,6 +3238,9 @@ function updateSyncSummary() {
 }
 
 function getTargetImageKb() {
+  if (state.dataSaver) {
+    return 22;
+  }
   if (state.mode === 'Ultra-ligero') {
     return 30;
   }
@@ -3177,6 +3251,9 @@ function getTargetImageKb() {
 }
 
 function getMaxDimensionForMode() {
+  if (state.dataSaver) {
+    return 480;
+  }
   if (state.mode === 'Ultra-ligero') {
     return 560;
   }

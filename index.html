@@ -68,6 +68,14 @@
           <input id="force-images" type="checkbox">
           <span>Forzar imagen</span>
         </label>
+        <label class="toggle-chip">
+          <input id="data-saver" type="checkbox">
+          <span>Ahorro datos</span>
+        </label>
+        <label class="toggle-chip">
+          <input id="haptics" type="checkbox">
+          <span>Vibración</span>
+        </label>
       </div>
       <div class="net-summary">
         <div><span class="label">Usuario</span><strong id="net-user">-</strong></div>
@@ -218,6 +226,7 @@
         </section>
         <div class="composer-actions">
           <label class="button ghost file-button button-icon" for="image-input"><span class="icon">＋</span><span>Imagen</span></label>
+          <button id="send-location" class="button ghost button-icon" type="button" aria-label="Compartir ubicación aproximada"><span class="icon">⌖</span><span>Ubicación</span></button>
           <button id="emoji-toggle" class="button ghost button-icon" type="button" aria-expanded="false" aria-controls="emoji-panel"><span class="icon">☺</span><span>Emoji</span></button>
           <button id="send-button" class="button button-icon" type="submit"><span class="icon">➤</span><span>Enviar</span></button>
         </div>
@@ -238,6 +247,6 @@
     </article>
   </template>
 
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=20"></script>
 </body>
 </html>
