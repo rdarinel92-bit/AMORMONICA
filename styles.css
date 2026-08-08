@@ -53,11 +53,14 @@ button {
 .identity-gate {
   position: fixed;
   inset: 0;
-  background: rgba(10, 13, 18, 0.9);
+  background:
+    radial-gradient(circle at top, rgba(76, 194, 255, 0.18), transparent 32%),
+    linear-gradient(180deg, rgba(10, 13, 18, 0.96), rgba(7, 10, 14, 0.99));
   display: grid;
   place-items: center;
-  padding: 12px;
-  z-index: 20;
+  padding: 16px;
+  z-index: 200;
+  backdrop-filter: blur(8px);
 }
 
 .identity-gate[hidden] {
@@ -67,12 +70,13 @@ button {
 .identity-card {
   width: min(560px, 100%);
   border: 1px solid var(--line);
-  background: var(--card);
+  background: linear-gradient(180deg, rgba(23, 27, 35, 0.96), rgba(16, 20, 28, 0.98));
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);
-  padding: 16px;
+  padding: 20px;
   display: grid;
   gap: 10px;
+  animation: identityPop 220ms ease-out;
 }
 
 .identity-card h2 {
@@ -84,6 +88,32 @@ button {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.identity-card .button {
+  min-height: 48px;
+  padding-inline: 16px;
+}
+
+.identity-card input {
+  min-height: 48px;
+}
+
+body.identity-lock .app > :not(.identity-gate) {
+  filter: blur(8px);
+  pointer-events: none;
+  user-select: none;
+}
+
+@keyframes identityPop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .topbar {

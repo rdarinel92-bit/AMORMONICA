@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v25';
+const APP_VERSION = '2026-08-08-v26';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -76,9 +76,9 @@ const state = {
   stability: 0,
   loss: 0,
   online: navigator.onLine,
-  messages: loadJson(STORAGE_KEYS.localMessages, []),
-  queuedTexts: loadJson(STORAGE_KEYS.queuedTexts, []),
-  knownRemoteIds: new Set(loadJson(STORAGE_KEYS.knownRemoteIds, [])),
+  messages: [],
+  queuedTexts: [],
+  knownRemoteIds: new Set(),
   probeSamples: [],
   db: null,
   realtimeSocket: null,
@@ -90,7 +90,7 @@ const state = {
   imageDraftQueue: [],
   activeUploadLocalId: '',
   uploadPumpRunning: false,
-  autoSavedImages: new Set(loadJson(STORAGE_KEYS.autoSavedImages, [])),
+  autoSavedImages: new Set(),
   forceImages: loadJson(STORAGE_KEYS.forceImages, true),
   dataSaver: false,
   haptics: loadJson(STORAGE_KEYS.haptics, false),
@@ -112,7 +112,7 @@ const state = {
   emojiPanelOpen: false,
   emojiPanelManuallyClosed: false,
   emojiCategory: 'recientes',
-  emojiRecent: loadJson(STORAGE_KEYS.emojiRecent, []),
+  emojiRecent: [],
   voiceRecorder: null,
   voiceStream: null,
   voiceChunks: [],
@@ -507,6 +507,11 @@ function bindUi() {
 
   if (elements.sendLocation) {
     elements.sendLocation.addEventListener('click', async () => {
+      if (!window.isSecureContext) {
+        setComposerHint('La ubicación requiere HTTPS o localhost en este navegador.');
+        return;
+      }
+
       if (!navigator.geolocation) {
         setComposerHint('Ubicación no disponible en este navegador.');
         return;
@@ -516,56 +521,54 @@ function bindUi() {
       try {
         const position = await new Promise((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: false,
-            timeout: 6000,
-            maximumAge: 120000
+            enableHighAccuracy: true,
+            timeout: 12000,
+            maximumAge: 0
           });
         });
         const lat = Number(position.coords.latitude).toFixed(5);
         const lon = Number(position.coords.longitude).toFixed(5);
-        const mapUrl = `https://maps.google.com/?q=${lat},${lon}`;
-        await enqueueTextMessage(`Ubicación aprox: ${lat}, ${lon} ${mapUrl}`);
+        const accuracy = Number(position.coords.accuracy || 0);
+        const mapUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+        const accuracyText = accuracy > 0 ? `, precisión aprox. ${Math.round(accuracy)} m` : '';
+        await enqueueTextMessage(`Ubicación GPS: ${lat}, ${lon}${accuracyText} ${mapUrl}`);
       } catch (error) {
         console.error(error);
-        setComposerHint('No se pudo obtener la ubicación.');
+        if (error && error.code === error.PERMISSION_DENIED) {
+          setComposerHint('Permiso de ubicación denegado. Actívalo en el navegador.');
+          return;
+        }
+        if (error && error.code === error.TIMEOUT) {
+          setComposerHint('No se logró fijar GPS a tiempo. Intenta de nuevo con mejor señal.');
+          return;
+        }
+        setComposerHint('No se pudo obtener la ubicación GPS.');
       }
     });
   }
 
   if (elements.voiceRecord) {
-    let holdTimer = 0;
-    let holdStartedRecording = false;
-
-    const clearHoldTimer = () => {
-      if (!holdTimer) {
-        return;
-      }
-      window.clearTimeout(holdTimer);
-      holdTimer = 0;
-    };
+    let pointerDown = false;
 
     elements.voiceRecord.addEventListener('pointerdown', (event) => {
       if (event.pointerType === 'mouse' && event.button !== 0) {
         return;
       }
-      holdStartedRecording = false;
-      clearHoldTimer();
-      holdTimer = window.setTimeout(() => {
-        holdTimer = 0;
-        startVoiceRecording().then(() => {
-          holdStartedRecording = Boolean(state.voiceRecorder && state.voiceRecorder.state === 'recording');
-          if (holdStartedRecording) {
-            setComposerHint('Grabando... suelta para enviar.');
-          }
-        }).catch((error) => {
-          console.error(error);
-        });
-      }, 160);
+      event.preventDefault();
+      pointerDown = true;
+      startVoiceRecording().then(() => {
+        if (state.voiceRecorder && state.voiceRecorder.state === 'recording') {
+          setComposerHint('Grabando... suelta para enviar.');
+        }
+      }).catch((error) => {
+        console.error(error);
+        pointerDown = false;
+      });
     });
 
     const stopHoldRecording = () => {
-      clearHoldTimer();
       const recording = Boolean(state.voiceRecorder && state.voiceRecorder.state === 'recording');
+      pointerDown = false;
       if (!recording) {
         return;
       }
@@ -577,10 +580,8 @@ function bindUi() {
     elements.voiceRecord.addEventListener('pointerup', stopHoldRecording);
     elements.voiceRecord.addEventListener('pointercancel', stopHoldRecording);
     elements.voiceRecord.addEventListener('pointerleave', () => {
-      if (holdStartedRecording) {
+      if (pointerDown) {
         stopHoldRecording();
-      } else {
-        clearHoldTimer();
       }
     });
 
@@ -1059,8 +1060,6 @@ function applyConfigToForm() {
 function ensureIdentitySelected() {
   return new Promise((resolve) => {
     const deviceId = ensureDeviceId();
-    const byDevice = normalizeIdentity(state.identityByDevice[deviceId] || '');
-    const previous = byDevice;
 
     if (state.pendingUrlIdentity) {
       const chosen = state.pendingUrlIdentity;
@@ -1070,24 +1069,10 @@ function ensureIdentitySelected() {
       saveJson(STORAGE_KEYS.identity, state.identity);
       saveJson(STORAGE_KEYS.identityByDevice, state.identityByDevice);
       saveJson(STORAGE_KEYS.config, state.config);
+      loadActiveUserState();
       elements.senderId.value = state.config.senderId;
       elements.identityCustom.value = chosen;
       state.pendingUrlIdentity = '';
-      setIdentityGateVisible(false);
-      updateActiveUserUi();
-      resolve();
-      return;
-    }
-
-    if (previous) {
-      state.identity = previous;
-      state.config.senderId = previous;
-      saveJson(STORAGE_KEYS.identity, state.identity);
-      saveJson(STORAGE_KEYS.config, state.config);
-      state.identityByDevice[deviceId] = previous;
-      saveJson(STORAGE_KEYS.identityByDevice, state.identityByDevice);
-      elements.senderId.value = state.config.senderId;
-      elements.identityCustom.value = previous;
       setIdentityGateVisible(false);
       updateActiveUserUi();
       resolve();
@@ -1102,6 +1087,9 @@ function ensureIdentitySelected() {
     elements.identityCustom.value = '';
 
     setIdentityGateVisible(true);
+    if (state.identityByDevice[deviceId]) {
+      elements.identityCustom.value = normalizeIdentity(state.identityByDevice[deviceId]);
+    }
 
     const choose = (rawName) => {
       const name = normalizeIdentity(rawName);
@@ -1110,12 +1098,14 @@ function ensureIdentitySelected() {
         return;
       }
 
+      resetTransientChatState();
       state.identity = name;
       state.config.senderId = name;
       state.identityByDevice[deviceId] = name;
       saveJson(STORAGE_KEYS.identity, state.identity);
       saveJson(STORAGE_KEYS.identityByDevice, state.identityByDevice);
       saveJson(STORAGE_KEYS.config, state.config);
+        loadActiveUserState();
       elements.senderId.value = state.config.senderId;
       setIdentityGateVisible(false);
       updateActiveUserUi();
@@ -1138,6 +1128,14 @@ function ensureIdentitySelected() {
 function setIdentityGateVisible(visible) {
   elements.identityGate.hidden = !visible;
   elements.identityGate.style.display = visible ? 'grid' : 'none';
+  document.body.classList.toggle('identity-lock', visible);
+  if (visible) {
+    window.requestAnimationFrame(() => {
+      if (elements.identityMonica) {
+        elements.identityMonica.focus();
+      }
+    });
+  }
 }
 
 function normalizeIdentity(value) {
@@ -1166,6 +1164,7 @@ function updateActiveUserUi() {
 function switchUserIdentity() {
   hideProfileMenu();
   const deviceId = ensureDeviceId();
+  resetTransientChatState();
   state.identity = '';
   state.config.senderId = '';
   if (deviceId && state.identityByDevice[deviceId]) {
@@ -1258,6 +1257,7 @@ function setComposerHint(text) {
 
 function canUseVoiceNotes() {
   return Boolean(
+    window.isSecureContext &&
     navigator.mediaDevices
     && typeof navigator.mediaDevices.getUserMedia === 'function'
     && typeof window.MediaRecorder !== 'undefined'
@@ -1496,7 +1496,7 @@ function registerRecentEmoji(emoji) {
   }
 
   state.emojiRecent = [emoji, ...state.emojiRecent.filter((item) => item !== emoji)].slice(0, 12);
-  saveJson(STORAGE_KEYS.emojiRecent, state.emojiRecent);
+  saveJson(userStorageKey(STORAGE_KEYS.emojiRecent), state.emojiRecent);
 }
 
 function setEmojiCategory(categoryKey) {
@@ -1579,15 +1579,51 @@ function formatDate(value) {
 }
 
 function persistMessages() {
-  saveJson(STORAGE_KEYS.localMessages, state.messages);
+  saveJson(userStorageKey(STORAGE_KEYS.localMessages), state.messages);
 }
 
 function persistQueuedTexts() {
-  saveJson(STORAGE_KEYS.queuedTexts, state.queuedTexts);
+  saveJson(userStorageKey(STORAGE_KEYS.queuedTexts), state.queuedTexts);
 }
 
 function persistKnownRemoteIds() {
-  saveJson(STORAGE_KEYS.knownRemoteIds, Array.from(state.knownRemoteIds));
+  saveJson(userStorageKey(STORAGE_KEYS.knownRemoteIds), Array.from(state.knownRemoteIds));
+}
+
+function loadActiveUserState() {
+  state.messages = loadUserJson(STORAGE_KEYS.localMessages, []);
+  state.queuedTexts = loadUserJson(STORAGE_KEYS.queuedTexts, []);
+  state.knownRemoteIds = new Set(loadUserJson(STORAGE_KEYS.knownRemoteIds, []));
+  state.autoSavedImages = new Set(loadUserJson(STORAGE_KEYS.autoSavedImages, []));
+  state.emojiRecent = loadUserJson(STORAGE_KEYS.emojiRecent, []);
+}
+
+function userStorageKey(baseKey) {
+  const identity = normalizeIdentity(state.config.senderId || state.identity || '');
+  return `${baseKey}:${identity || 'anon'}`;
+}
+
+function loadUserJson(baseKey, fallback) {
+  return loadJson(userStorageKey(baseKey), fallback);
+}
+
+function saveUserJson(baseKey, value) {
+  saveJson(userStorageKey(baseKey), value);
+}
+
+function resetTransientChatState() {
+  state.messages = [];
+  state.queuedTexts = [];
+  state.knownRemoteIds = new Set();
+  state.autoSavedImages = new Set();
+  state.selectedMessageKey = '';
+  state.historyOldestTimestamp = null;
+  state.historyHasMore = true;
+  state.lastSyncAt = null;
+  state.unreadCount = 0;
+  imageCache.clear();
+  updateTitleBadge();
+  renderMessages();
 }
 
 async function saveProfilePhoto(file) {
@@ -1608,7 +1644,7 @@ async function saveProfilePhoto(file) {
     syncProfileAvatarVisibility();
 
     const optimizedDataUrl = await optimizeProfilePhoto(file);
-    localStorage.setItem(STORAGE_KEYS.profilePhoto, optimizedDataUrl);
+    localStorage.setItem(profilePhotoStorageKey(), optimizedDataUrl);
     elements.profileAvatarImg.src = optimizedDataUrl;
     if (elements.profileAvatarImgTopbar) {
       elements.profileAvatarImgTopbar.src = optimizedDataUrl;
@@ -1625,7 +1661,7 @@ async function saveProfilePhoto(file) {
 function loadProfilePhoto() {
   try {
     updateProfileFallbackInitial();
-    const photoDataUrl = localStorage.getItem(STORAGE_KEYS.profilePhoto);
+    const photoDataUrl = localStorage.getItem(profilePhotoStorageKey());
     if (photoDataUrl) {
       elements.profileAvatarImg.src = photoDataUrl;
       elements.profileAvatarImg.style.opacity = '1';
@@ -1675,6 +1711,11 @@ function blobToDataUrl(blob) {
 
 function persistAutoSavedImages() {
   saveJson(STORAGE_KEYS.autoSavedImages, Array.from(state.autoSavedImages));
+}
+
+function profilePhotoStorageKey() {
+  const identity = normalizeIdentity(state.config.senderId || state.identity || '');
+  return `${STORAGE_KEYS.profilePhoto}:${identity || 'anon'}`;
 }
 
 function messageKey(message) {
@@ -1961,9 +2002,6 @@ async function renderImageMessage(message, container, loadingNode, selected = fa
 
     loadingNode.replaceWith(frame);
 
-    if (!isOwnMessage(message)) {
-      autoSaveReceivedImage(message, src).catch((error) => console.error(error));
-    }
   } catch (error) {
     loadingNode.textContent = 'Imagen atrasada. Reintentando...';
     scheduleImageRetry(message);
@@ -2085,14 +2123,6 @@ async function autoSaveReceivedImage(message, src) {
   }
   state.autoSavedImages.add(key);
   persistAutoSavedImages();
-
-  if (document.hidden) {
-    return;
-  }
-
-  window.setTimeout(() => {
-    downloadImageAsset(message, src).catch((error) => console.error(error));
-  }, 250);
 }
 
 function scheduleImageRetry(message) {
@@ -4297,6 +4327,7 @@ function toggleProfileMenu() {
 }
 
 function clearProfilePhoto() {
+  localStorage.removeItem(profilePhotoStorageKey());
   localStorage.removeItem(STORAGE_KEYS.profilePhoto);
   elements.profileAvatarImg.removeAttribute('src');
   elements.profileAvatarImg.style.opacity = '0';
