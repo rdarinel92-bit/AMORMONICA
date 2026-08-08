@@ -132,10 +132,15 @@ async function boot() {
 }
 
 function bindUi() {
-  elements.netFab.addEventListener('click', () => {
+  elements.netFab.addEventListener('click', (event) => {
+    event.stopPropagation();
     const isOpen = !elements.netPanel.hidden;
     elements.netPanel.hidden = isOpen;
     elements.netFab.setAttribute('aria-expanded', String(!isOpen));
+  });
+
+  elements.netPanel.addEventListener('click', (event) => {
+    event.stopPropagation();
   });
 
   document.addEventListener('click', (event) => {
