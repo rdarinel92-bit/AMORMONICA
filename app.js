@@ -1312,32 +1312,19 @@ async function showImageDraftPanel(file, extraFiles = []) {
   setComposerHint(`Comprimiendo imagen a menos de ${targetKb} KB...`);
 
   try {
-    const compressed = await compressImage(file, targetKb, getMaxDimensionForMode());
-    const previewUrl = URL.createObjectURL(compressed);
-
-    setComposerHint('Preparando chunks de imagen...');
-    const localId = createId('img');
-    const chunks = await buildChunkManifest(compressed, localId);
+    const prepared = await prepareImageDraftItem(file);
 
     state.imageDraftFile = file;
     state.imageDraftQueue = extraFiles.map((nextFile) => ({ file: nextFile }));
-    state.imageDraft = {
-      compressed,
-      previewUrl,
-      targetKb,
-      fileName: file.name,
-      originalSize: file.size,
-      localId,
-      chunks
-    };
+    state.imageDraft = prepared;
 
-    const canvas = await getCanvasFromImageFile(compressed);
-    elements.draftImagePreview.src = previewUrl;
-    elements.draftSize.textContent = `${Math.ceil(compressed.size / 1024)} KB`;
+    const canvas = await getCanvasFromImageFile(prepared.compressed);
+    elements.draftImagePreview.src = prepared.previewUrl;
+    elements.draftSize.textContent = `${Math.ceil(prepared.compressed.size / 1024)} KB`;
     elements.draftResolution.textContent = `${canvas.width} × ${canvas.height}`;
     elements.draftMode.textContent = state.mode;
 
-    const estimatedSeconds = estimateUploadTime(compressed.size);
+    const estimatedSeconds = estimateUploadTime(prepared.compressed.size);
     elements.draftEstimate.textContent = estimatedSeconds > 0 ? `~${estimatedSeconds}s` : 'Bajo demanda';
     if (elements.draftQueueCount) {
       elements.draftQueueCount.textContent = String(state.imageDraftQueue.length);
@@ -1357,6 +1344,35 @@ async function showImageDraftPanel(file, extraFiles = []) {
 
 const showImageDrafPanel = showImageDraftPanel;
 
+async function prepareImageDraftItem(file) {
+  const targetKb = getTargetImageKb();
+  const compressed = await compressImage(file, targetKb, getMaxDimensionForMode());
+  const previewUrl = URL.createObjectURL(compressed);
+  const localId = createId('img');
+  const chunks = await buildChunkManifest(compressed, localId);
+  return {
+    compressed,
+    previewUrl,
+    targetKb,
+    fileName: file.name,
+    originalSize: file.size,
+    localId,
+    chunks
+  };
+}
+
+async function prepareImageQueueItems(queueItems) {
+  const total = queueItems.length;
+  for (let index = 0; index < total; index += 1) {
+    const item = queueItems[index];
+    if (!item || !item.file || item.prepared) {
+      continue;
+    }
+    setComposerHint(`Preparando imágenes ${index + 1}/${total}...`);
+    item.prepared = await prepareImageDraftItem(item.file);
+  }
+}
+
 async function processImageSendQueue() {
   if (state.uploadPumpRunning) {
     return;
@@ -1364,6 +1380,8 @@ async function processImageSendQueue() {
 
   state.uploadPumpRunning = true;
   try {
+    await prepareImageQueueItems(state.imageDraftQueue);
+
     const total = state.imageDraftQueue.length;
     let processed = 0;
     while (state.imageDraftQueue.length > 0) {
