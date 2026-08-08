@@ -64,6 +64,9 @@ const state = {
 };
 
 const elements = {
+  netFab: document.getElementById('net-fab'),
+  netFabMode: document.getElementById('net-fab-mode'),
+  netPanel: document.getElementById('net-panel'),
   activeUser: document.getElementById('active-user'),
   identityGate: document.getElementById('identity-gate'),
   identityRoberto: document.getElementById('identity-roberto'),
@@ -129,6 +132,27 @@ async function boot() {
 }
 
 function bindUi() {
+  elements.netFab.addEventListener('click', () => {
+    const isOpen = !elements.netPanel.hidden;
+    elements.netPanel.hidden = isOpen;
+    elements.netFab.setAttribute('aria-expanded', String(!isOpen));
+  });
+
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    if (elements.netPanel.hidden) {
+      return;
+    }
+    if (elements.netPanel.contains(target) || elements.netFab.contains(target)) {
+      return;
+    }
+    elements.netPanel.hidden = true;
+    elements.netFab.setAttribute('aria-expanded', 'false');
+  });
+
   elements.toggleSetup.addEventListener('click', () => {
     elements.setupPanel.hidden = !elements.setupPanel.hidden;
   });
@@ -1120,6 +1144,7 @@ function selectConnectionMode() {
 
 function updateConnectionUi() {
   elements.connectionMode.textContent = state.mode;
+  elements.netFabMode.textContent = state.mode;
   elements.connectionSpeed.textContent = state.kbps ? `${state.kbps} kbps` : state.online ? 'Midiendo' : 'Offline';
   elements.connectionLatency.textContent = state.latency ? `${state.latency} ms` : '-';
   elements.connectionStability.textContent = `${Math.round(state.stability * 100)}%`;

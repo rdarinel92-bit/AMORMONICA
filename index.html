@@ -33,30 +33,33 @@
       </div>
     </section>
 
-    <section class="status-grid" aria-label="Estado de conexion">
-      <div class="status-card">
-        <span class="label">Modo</span>
-        <strong id="connection-mode">Sin configurar</strong>
-      </div>
-      <div class="status-card">
-        <span class="label">Velocidad</span>
-        <strong id="connection-speed">-</strong>
-      </div>
-      <div class="status-card">
-        <span class="label">Latencia</span>
-        <strong id="connection-latency">-</strong>
-      </div>
-      <div class="status-card">
-        <span class="label">Estabilidad</span>
-        <strong id="connection-stability">-</strong>
-      </div>
-      <div class="status-card">
-        <span class="label">Perdida</span>
-        <strong id="connection-loss">-</strong>
-      </div>
-      <div class="status-card">
-        <span class="label">Cola</span>
-        <strong id="queue-size">0</strong>
+    <button id="net-fab" class="net-fab" type="button" aria-controls="net-panel" aria-expanded="false">Red: <span id="net-fab-mode">--</span></button>
+    <section id="net-panel" class="net-panel" aria-label="Estado de conexion" hidden>
+      <div class="status-grid compact">
+        <div class="status-card">
+          <span class="label">Modo</span>
+          <strong id="connection-mode">Sin configurar</strong>
+        </div>
+        <div class="status-card">
+          <span class="label">Velocidad</span>
+          <strong id="connection-speed">-</strong>
+        </div>
+        <div class="status-card">
+          <span class="label">Latencia</span>
+          <strong id="connection-latency">-</strong>
+        </div>
+        <div class="status-card">
+          <span class="label">Estabilidad</span>
+          <strong id="connection-stability">-</strong>
+        </div>
+        <div class="status-card">
+          <span class="label">Perdida</span>
+          <strong id="connection-loss">-</strong>
+        </div>
+        <div class="status-card">
+          <span class="label">Cola</span>
+          <strong id="queue-size">0</strong>
+        </div>
       </div>
     </section>
 

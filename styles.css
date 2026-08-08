@@ -101,6 +101,34 @@ button {
   margin: 12px 0;
 }
 
+.status-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.net-fab {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 10;
+  border: 1px solid var(--fg);
+  background: var(--fg);
+  color: var(--bg);
+  padding: 8px 10px;
+  font-size: 0.84rem;
+}
+
+.net-panel {
+  position: fixed;
+  right: 14px;
+  bottom: 58px;
+  width: min(320px, calc(100vw - 28px));
+  border: 1px solid var(--line);
+  background: var(--bg);
+  z-index: 10;
+  padding: 8px;
+}
+
 .status-card,
 .setup-panel,
 .message,
@@ -174,23 +202,29 @@ textarea {
   min-height: 45vh;
   border: 1px solid var(--line);
   padding: 8px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-content: start;
+  align-items: stretch;
 }
 
 .message {
   padding: 8px;
+  max-width: 78%;
+  width: fit-content;
 }
 
 .message.mine {
-  margin-left: 36px;
+  align-self: flex-end;
+  margin-left: auto;
   border-color: #94b8a1;
   background: #eef7f1;
 }
 
 .message.theirs {
-  margin-right: 36px;
+  align-self: flex-start;
+  margin-right: auto;
+  background: #f8f8f8;
 }
 
 .message.pending {
@@ -259,10 +293,8 @@ pre {
     flex-direction: column;
   }
 
-  .message.mine,
-  .message.theirs {
-    margin-left: 0;
-    margin-right: 0;
+  .message {
+    max-width: 90%;
   }
 }
 
