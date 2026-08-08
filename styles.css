@@ -1,15 +1,15 @@
 :root {
-  color-scheme: light;
-  --bg: #f6f8fb;
-  --card: #ffffff;
-  --fg: #152132;
-  --muted: #5d6a7b;
-  --line: #d8e0eb;
-  --soft: #f1f5fa;
-  --accent: #1f6feb;
-  --accent-soft: #e9f1ff;
-  --shadow-sm: 0 1px 2px rgba(13, 22, 40, 0.06);
-  --shadow-md: 0 8px 24px rgba(17, 30, 48, 0.08);
+  color-scheme: dark;
+  --bg: #0e1116;
+  --card: #171b23;
+  --fg: #f3f7ff;
+  --muted: #a8b3c7;
+  --line: #2b3342;
+  --soft: #202735;
+  --accent: #4cc2ff;
+  --accent-soft: rgba(76, 194, 255, 0.22);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 12px 30px rgba(0, 0, 0, 0.45);
   --radius: 14px;
 }
 
@@ -28,7 +28,7 @@ body {
 
 body {
   min-height: 100vh;
-  background: linear-gradient(180deg, #f9fbff 0%, #f3f7fc 100%);
+  background: radial-gradient(circle at 20% 0%, #1a2333 0%, #0e1116 55%, #0a0d12 100%);
 }
 
 button,
@@ -52,7 +52,7 @@ button {
 .identity-gate {
   position: fixed;
   inset: 0;
-  background: rgba(255, 255, 255, 0.94);
+  background: rgba(10, 13, 18, 0.9);
   display: grid;
   place-items: center;
   padding: 12px;
@@ -264,7 +264,7 @@ input,
 textarea {
   width: 100%;
   border: 1px solid var(--line);
-  background: #fbfdff;
+  background: var(--soft);
   padding: 8px;
   resize: vertical;
   border-radius: 10px;
@@ -273,7 +273,7 @@ textarea {
 input:focus,
 textarea:focus {
   outline: none;
-  border-color: #9cbcf3;
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
@@ -287,7 +287,7 @@ textarea:focus {
 .button {
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #ffffff;
+  color: #05131c;
   padding: 8px 12px;
   border-radius: 10px;
 }
@@ -320,7 +320,7 @@ textarea:focus {
   flex-direction: column;
   gap: 8px;
   align-items: stretch;
-  background: linear-gradient(180deg, #fcfdff 0%, #f7f9fd 100%);
+  background: linear-gradient(180deg, #121722 0%, #0f141f 100%);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }
@@ -335,14 +335,14 @@ textarea:focus {
 .message.mine {
   align-self: flex-end;
   margin-left: auto;
-  border-color: #b8cef8;
-  background: #eaf2ff;
+  border-color: #2b4960;
+  background: #163248;
 }
 
 .message.theirs {
   align-self: flex-start;
   margin-right: auto;
-  background: #ffffff;
+  background: #1b2130;
 }
 
 .message.pending {
@@ -350,8 +350,8 @@ textarea:focus {
 }
 
 .message.error {
-  border-color: #aa2222;
-  background: #fff3f3;
+  border-color: #8a2e2e;
+  background: #3a1f25;
 }
 
 .message-meta {
