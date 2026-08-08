@@ -330,6 +330,7 @@ textarea:focus {
   max-width: 78%;
   width: fit-content;
   border-radius: 12px;
+  position: relative;
 }
 
 .message.mine {
@@ -354,6 +355,18 @@ textarea:focus {
   background: #3a1f25;
 }
 
+.message.selected {
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-sm);
+}
+
+.message.selected .message-actions {
+  display: flex;
+}
+
+.message.selected .image-cancel {
+  display: inline-flex;
+}
+
 .message-meta {
   display: flex;
   gap: 8px;
@@ -376,6 +389,8 @@ textarea:focus {
   margin-top: 8px;
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .message-edit {

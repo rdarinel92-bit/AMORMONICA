@@ -67,6 +67,7 @@ const state = {
   autoSavedImages: new Set(loadJson(STORAGE_KEYS.autoSavedImages, [])),
   forceImages: loadJson(STORAGE_KEYS.forceImages, false),
   e2eeUnlockUntil: loadJson(STORAGE_KEYS.e2eeUnlockUntil, 0),
+  selectedMessageKey: '',
   e2eeKeyPromise: null,
   e2eeKeyFingerprint: '',
   lastSyncAt: null,
@@ -220,6 +221,9 @@ function bindUi() {
     const target = event.target;
     if (!(target instanceof Element)) {
       return;
+    }
+    if (!target.closest('.message')) {
+      clearSelectedMessage();
     }
     if (elements.netPanel.hidden) {
       return;
@@ -558,6 +562,27 @@ function isOwnMessage(message) {
   return message.sender === state.config.senderId;
 }
 
+function selectMessage(message) {
+  const key = messageKey(message);
+  if (!key) {
+    return;
+  }
+  state.selectedMessageKey = key;
+  renderMessages();
+}
+
+function clearSelectedMessage() {
+  if (!state.selectedMessageKey) {
+    return;
+  }
+  state.selectedMessageKey = '';
+  renderMessages();
+}
+
+function getSelectedMessage() {
+  return state.messages.find((item) => messageKey(item) === state.selectedMessageKey) || null;
+}
+
 function upsertMessage(message) {
   const key = messageKey(message);
   const index = state.messages.findIndex((item) => messageKey(item) === key || (item.id && message.id && item.id === message.id));
@@ -582,6 +607,9 @@ function renderMessages() {
     const body = fragment.querySelector('.message-body');
 
     const own = isOwnMessage(message);
+    const selected = messageKey(message) && messageKey(message) === state.selectedMessageKey;
+    let pressTimer = null;
+    let longPressTriggered = false;
     sender.textContent = own ? 'Tu' : formatUserName(message.sender || 'desconocido');
     time.textContent = formatDate(message.timestamp || new Date().toISOString());
     status.textContent = buildStatusLabel(message);
@@ -589,6 +617,53 @@ function renderMessages() {
     root.classList.toggle('theirs', !own);
     root.classList.toggle('pending', message.status === 'pending');
     root.classList.toggle('error', message.status === 'error');
+    root.classList.toggle('selected', selected);
+    root.dataset.messageKey = messageKey(message) || '';
+
+    const startSelectTimer = () => {
+      if (pressTimer) {
+        window.clearTimeout(pressTimer);
+      }
+      longPressTriggered = false;
+      pressTimer = window.setTimeout(() => {
+        longPressTriggered = true;
+        selectMessage(message);
+      }, 650);
+    };
+
+    const cancelSelectTimer = () => {
+      if (pressTimer) {
+        window.clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+    };
+
+    root.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return;
+      }
+      startSelectTimer();
+    });
+
+    root.addEventListener('pointerup', cancelSelectTimer);
+    root.addEventListener('pointercancel', cancelSelectTimer);
+    root.addEventListener('pointerleave', cancelSelectTimer);
+    root.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      selectMessage(message);
+    });
+    root.addEventListener('click', () => {
+      if (!state.selectedMessageKey && !longPressTriggered) {
+        return;
+      }
+      if (!selected) {
+        selectMessage(message);
+        return;
+      }
+      if (!longPressTriggered) {
+        return;
+      }
+    });
 
     if (message.type === 'image') {
       if (message.status === 'error' && !message.content) {
@@ -601,7 +676,7 @@ function renderMessages() {
       const loading = document.createElement('p');
       loading.textContent = message.status === 'pending' ? 'Imagen pendiente...' : 'Cargando imagen...';
       body.appendChild(loading);
-      renderImageMessage(message, body, loading);
+      renderImageMessage(message, body, loading, selected);
     } else {
       const text = document.createElement('p');
       text.textContent = message.display_content || message.content || '';
@@ -620,7 +695,22 @@ function renderMessages() {
             setComposerHint('No se pudo editar el mensaje.');
           });
         });
+        editButton.hidden = !selected;
         actions.appendChild(editButton);
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'button ghost message-edit';
+        deleteButton.textContent = 'Eliminar';
+        deleteButton.addEventListener('click', () => {
+          deleteOwnTextMessage(message).catch((error) => {
+            console.error(error);
+            setComposerHint('No se pudo eliminar el mensaje.');
+          });
+        });
+        deleteButton.hidden = !selected;
+        actions.appendChild(deleteButton);
+        actions.hidden = !selected;
         body.appendChild(actions);
       }
     }
@@ -655,7 +745,7 @@ function buildStatusLabel(message) {
   return 'pendiente';
 }
 
-async function renderImageMessage(message, container, loadingNode) {
+async function renderImageMessage(message, container, loadingNode, selected = false) {
   try {
     let src = message.previewUrl || '';
     if (!src && message.content) {
@@ -696,6 +786,7 @@ async function renderImageMessage(message, container, loadingNode) {
           setComposerHint('No se pudo completar la accion sobre la imagen.');
         });
       });
+      controlButton.hidden = !selected;
       actions.appendChild(controlButton);
     }
 
@@ -919,6 +1010,37 @@ async function editLastOwnTextMessage() {
   await editOwnTextMessage(ownTextMessages[ownTextMessages.length - 1]);
 }
 
+async function deleteOwnTextMessage(message) {
+  if (!message || message.type !== 'text' || !isOwnMessage(message) || !message.local_id) {
+    return;
+  }
+
+  const queuedIndex = state.queuedTexts.findIndex((item) => item.local_id === message.local_id);
+  if (queuedIndex >= 0) {
+    state.queuedTexts.splice(queuedIndex, 1);
+    persistQueuedTexts();
+  }
+
+  if (state.online && isConfigured()) {
+    await deleteMessageRemote(message.local_id).catch(async () => {
+      await updateMessageRemote(message.local_id, {
+        status: 'error',
+        content: '',
+        chunks_total: 0,
+        chunks_sent: 0
+      }).catch(() => {
+      });
+    });
+  }
+
+  removeLocalMessage(message.local_id);
+  if (state.selectedMessageKey === message.local_id) {
+    state.selectedMessageKey = '';
+  }
+  updateQueueSize();
+  setComposerHint('Mensaje eliminado del chat.');
+}
+
 function removeLocalMessage(localId) {
   const index = state.messages.findIndex((item) => item.local_id === localId);
   if (index < 0) {
@@ -946,6 +1068,12 @@ async function cancelOrRemoveOwnImage(message) {
   }
 
   await dbDelete(UPLOAD_STORE, message.local_id);
+
+  if (message.content) {
+    await deleteOwnImageAssets(message).catch((error) => {
+      console.error(error);
+    });
+  }
 
   if (state.online && isConfigured()) {
     await deleteMessageRemote(message.local_id).catch(async () => {
@@ -1243,14 +1371,19 @@ async function refreshHistory(options = {}) {
   }
   try {
     const remoteMessages = await fetchMessagesRemote();
+    const remoteLocalIds = new Set();
     for (const rawMessage of remoteMessages) {
       const message = await hydrateIncomingMessage(rawMessage);
       if (message.id) {
         state.knownRemoteIds.add(message.id);
       }
+      if (message.local_id) {
+        remoteLocalIds.add(message.local_id);
+      }
       upsertMessage(message);
       syncMessageReceipt(message);
     }
+    pruneMissingSessionMessages(remoteLocalIds);
     persistKnownRemoteIds();
     state.lastSyncAt = new Date().toISOString();
     updateSyncSummary();
@@ -1329,6 +1462,68 @@ async function deleteMessageRemote(localId) {
   });
   if (!response.ok) {
     throw new Error(await response.text());
+  }
+}
+
+function removeMessageByRemoteRecord(record) {
+  const key = record && (record.local_id || record.id);
+  if (!key) {
+    return;
+  }
+  const index = state.messages.findIndex((item) => item.local_id === key || item.id === key || (record.id && item.id === record.id));
+  if (index < 0) {
+    return;
+  }
+  state.messages.splice(index, 1);
+  if (state.selectedMessageKey === key || state.selectedMessageKey === record.id) {
+    state.selectedMessageKey = '';
+  }
+  persistMessages();
+  renderMessages();
+}
+
+function pruneMissingSessionMessages(remoteLocalIds) {
+  const before = state.messages.length;
+  state.messages = state.messages.filter((message) => {
+    if (message.session_id !== state.config.sessionId) {
+      return true;
+    }
+    if (!message.local_id) {
+      return true;
+    }
+    return remoteLocalIds.has(message.local_id);
+  });
+  if (state.messages.length !== before) {
+    if (state.selectedMessageKey && !state.messages.some((item) => messageKey(item) === state.selectedMessageKey)) {
+      state.selectedMessageKey = '';
+    }
+    persistMessages();
+    renderMessages();
+  }
+}
+
+async function deleteStorageObject(path) {
+  const response = await fetch(`${state.config.supabaseUrl}/storage/v1/object/${state.config.bucketName}/${path}`, {
+    method: 'DELETE',
+    headers: supabaseHeaders()
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+}
+
+async function deleteOwnImageAssets(message) {
+  if (!message || !message.content) {
+    return;
+  }
+  const manifest = await fetchJsonWithAuth(message.content);
+  if (manifest && Array.isArray(manifest.chunks)) {
+    for (const chunk of manifest.chunks) {
+      await deleteStorageObject(chunk.path);
+    }
+  }
+  if (manifest && manifest.sessionId && manifest.localId) {
+    await deleteStorageObject(`manifests/${manifest.sessionId}/${manifest.localId}.json`);
   }
 }
 
@@ -1437,11 +1632,24 @@ function connectRealtime() {
   socket.addEventListener('message', (event) => {
     try {
       const data = JSON.parse(event.data);
-      if (data.event === 'postgres_changes' && data.payload && data.payload.data && data.payload.data.record) {
-        const record = data.payload.data.record;
-        if (record.session_id !== state.config.sessionId) {
+      if (data.event === 'postgres_changes' && data.payload && data.payload.data) {
+        const change = data.payload.data;
+        const record = change.record || change.new || change.new_record || null;
+        const oldRecord = change.old_record || change.old || null;
+        const eventType = String(change.eventType || data.type || data.eventType || '').toUpperCase();
+
+        if (eventType === 'DELETE' || (!record && oldRecord)) {
+          const target = oldRecord || record;
+          if (target && target.session_id === state.config.sessionId) {
+            removeMessageByRemoteRecord(target);
+          }
           return;
         }
+
+        if (!record || record.session_id !== state.config.sessionId) {
+          return;
+        }
+
         if (record.id) {
           state.knownRemoteIds.add(record.id);
           persistKnownRemoteIds();
