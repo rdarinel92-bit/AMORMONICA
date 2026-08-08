@@ -47,14 +47,19 @@
     <section id="setup-panel" class="setup-panel" hidden>
       <h2>Configuracion Supabase</h2>
       <p class="setup-note">Usa la clave anon publica. No pongas service role en el navegador.</p>
+      <p class="setup-note">La configuracion queda bloqueada por defecto para evitar cambios accidentales.</p>
       <form id="config-form" class="config-form">
+        <label>
+          Cifrado de mensajes (clave compartida)
+          <input id="e2ee-passphrase" name="e2eePassphrase" type="password" placeholder="Clave E2E opcional" autocomplete="off">
+        </label>
         <label>
           URL de Supabase
           <input id="supabase-url" name="supabaseUrl" type="url" placeholder="https://tu-proyecto.supabase.co" autocomplete="off">
         </label>
         <label>
           Clave anon
-          <textarea id="supabase-key" name="supabaseKey" rows="3" placeholder="eyJ..."></textarea>
+          <input id="supabase-key" name="supabaseKey" type="password" placeholder="eyJ..." autocomplete="off">
         </label>
         <label>
           Sala o session_id
@@ -77,7 +82,8 @@
           <input id="export-email" name="exportEmail" type="email" placeholder="correo@ejemplo.com" autocomplete="off">
         </label>
         <div class="setup-actions">
-          <button class="button" type="submit">Guardar</button>
+          <button id="save-config" class="button" type="submit">Guardar</button>
+          <button id="toggle-config-lock" class="button ghost" type="button">Desbloquear config</button>
           <button id="reload-history" class="button ghost" type="button">Recargar historial</button>
           <button id="export-history" class="button ghost" type="button">Exportar historial</button>
           <button id="download-transcript" class="button ghost" type="button">Descargar TXT</button>

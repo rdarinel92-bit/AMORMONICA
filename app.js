@@ -2,7 +2,8 @@ const STORAGE_KEYS = {
   config: 'chat-lite-config',
   queuedTexts: 'chat-lite-queued-texts',
   localMessages: 'chat-lite-local-messages',
-  knownRemoteIds: 'chat-lite-known-remote-ids'
+  knownRemoteIds: 'chat-lite-known-remote-ids',
+  configLocked: 'chat-lite-config-locked'
 };
 
 const DB_NAME = 'chat-lite-db';
@@ -12,6 +13,7 @@ const CACHE_STORE = 'cache';
 const CHUNK_SIZE = 5 * 1024;
 const HEARTBEAT_MS = 25000;
 const PROBE_HISTORY = 8;
+const ENC_PREFIX = 'enc:v1:';
 const imageCache = new Map();
 const COMMON_TYPO_FIXES = {
   adme: 'dame',
@@ -32,11 +34,13 @@ const defaultConfig = {
   senderId: createId('user'),
   bucketName: 'chat-files',
   exportEndpoint: 'exportHistory',
-  exportEmail: ''
+  exportEmail: '',
+  e2eePassphrase: ''
 };
 
 const state = {
   config: { ...defaultConfig, ...loadJson(STORAGE_KEYS.config, {}) },
+  configLocked: loadJson(STORAGE_KEYS.configLocked, true),
   mode: 'Sin configurar',
   kbps: 0,
   latency: 0,
@@ -52,6 +56,8 @@ const state = {
   heartbeatTimer: null,
   resumeTimer: null,
   imageRetryTimers: new Map(),
+  e2eeKeyPromise: null,
+  e2eeKeyFingerprint: '',
   initialized: false
 };
 
@@ -59,6 +65,9 @@ const elements = {
   toggleSetup: document.getElementById('toggle-setup'),
   setupPanel: document.getElementById('setup-panel'),
   configForm: document.getElementById('config-form'),
+  saveConfig: document.getElementById('save-config'),
+  toggleConfigLock: document.getElementById('toggle-config-lock'),
+  e2eePassphrase: document.getElementById('e2ee-passphrase'),
   supabaseUrl: document.getElementById('supabase-url'),
   supabaseKey: document.getElementById('supabase-key'),
   sessionId: document.getElementById('session-id'),
@@ -113,17 +122,35 @@ function bindUi() {
     elements.setupPanel.hidden = !elements.setupPanel.hidden;
   });
 
+  elements.toggleConfigLock.addEventListener('click', () => {
+    state.configLocked = !state.configLocked;
+    saveJson(STORAGE_KEYS.configLocked, state.configLocked);
+    applyConfigLockUi();
+    setComposerHint(state.configLocked
+      ? 'Configuracion bloqueada para evitar cambios accidentales.'
+      : 'Configuracion desbloqueada. Guarda si hiciste cambios.');
+  });
+
   elements.configForm.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (state.configLocked) {
+      setComposerHint('La configuracion esta bloqueada. Pulsa "Desbloquear config" para editar.');
+      return;
+    }
+
+    const nextSupabaseKey = elements.supabaseKey.value.trim() || state.config.supabaseKey;
+    const nextPassphrase = elements.e2eePassphrase.value.trim() || state.config.e2eePassphrase || '';
     state.config = {
-      supabaseUrl: elements.supabaseUrl.value.trim().replace(/\/$/, ''),
-      supabaseKey: elements.supabaseKey.value.trim(),
+      supabaseUrl: elements.supabaseUrl.value.trim().replace(/\/$/, '') || state.config.supabaseUrl,
+      supabaseKey: nextSupabaseKey,
       sessionId: elements.sessionId.value.trim() || defaultConfig.sessionId,
       senderId: elements.senderId.value.trim() || createId('user'),
       bucketName: elements.bucketName.value.trim() || defaultConfig.bucketName,
       exportEndpoint: elements.exportEndpoint.value.trim() || defaultConfig.exportEndpoint,
-      exportEmail: elements.exportEmail.value.trim()
+      exportEmail: elements.exportEmail.value.trim(),
+      e2eePassphrase: nextPassphrase
     };
+    resetE2EECache();
     saveJson(STORAGE_KEYS.config, state.config);
     elements.setupRequirements.textContent = buildSetupRequirements();
     disconnectRealtime();
@@ -198,6 +225,7 @@ function bindUi() {
 }
 
 function applyConfigToForm() {
+  elements.e2eePassphrase.value = state.config.e2eePassphrase || '';
   elements.supabaseUrl.value = state.config.supabaseUrl;
   elements.supabaseKey.value = state.config.supabaseKey;
   elements.sessionId.value = state.config.sessionId;
@@ -205,6 +233,26 @@ function applyConfigToForm() {
   elements.bucketName.value = state.config.bucketName;
   elements.exportEndpoint.value = state.config.exportEndpoint;
   elements.exportEmail.value = state.config.exportEmail;
+  applyConfigLockUi();
+}
+
+function applyConfigLockUi() {
+  const locked = state.configLocked;
+  const lockedInputs = [
+    elements.e2eePassphrase,
+    elements.supabaseUrl,
+    elements.supabaseKey,
+    elements.sessionId,
+    elements.senderId,
+    elements.bucketName,
+    elements.exportEndpoint,
+    elements.exportEmail,
+    elements.saveConfig
+  ];
+  for (const node of lockedInputs) {
+    node.disabled = locked;
+  }
+  elements.toggleConfigLock.textContent = locked ? 'Desbloquear config' : 'Bloquear config';
 }
 
 function isConfigured() {
@@ -300,7 +348,7 @@ function renderMessages() {
       renderImageMessage(message, body, loading);
     } else {
       const text = document.createElement('p');
-      text.textContent = message.content || '';
+      text.textContent = message.display_content || message.content || '';
       body.appendChild(text);
     }
 
@@ -407,11 +455,14 @@ function mergeArrayBuffers(buffers) {
 }
 
 async function enqueueTextMessage(text) {
+  const encoded = await encodeOutgoingText(text);
   const message = {
     local_id: createId('msg'),
     sender: state.config.senderId,
     type: 'text',
-    content: text,
+    content: encoded.wire,
+    display_content: text,
+    encrypted: encoded.encrypted,
     timestamp: new Date().toISOString(),
     status: state.online && isConfigured() ? 'pending' : 'pending',
     chunks_total: 0,
@@ -666,7 +717,8 @@ async function refreshHistory(options = {}) {
   }
   try {
     const remoteMessages = await fetchMessagesRemote();
-    for (const message of remoteMessages) {
+    for (const rawMessage of remoteMessages) {
+      const message = await hydrateIncomingMessage(rawMessage);
       if (message.id) {
         state.knownRemoteIds.add(message.id);
       }
@@ -710,9 +762,10 @@ async function insertMessageRemote(message) {
   }
   const rows = await response.json();
   if (rows[0] && rows[0].id) {
+    const hydrated = await hydrateIncomingMessage(rows[0]);
     state.knownRemoteIds.add(rows[0].id);
     persistKnownRemoteIds();
-    upsertMessage(rows[0]);
+    upsertMessage(hydrated);
   }
 }
 
@@ -731,7 +784,8 @@ async function updateMessageRemote(localId, patch) {
   }
   const rows = await response.json();
   if (rows[0]) {
-    upsertMessage(rows[0]);
+    const hydrated = await hydrateIncomingMessage(rows[0]);
+    upsertMessage(hydrated);
   }
 }
 
@@ -823,7 +877,9 @@ function connectRealtime() {
           state.knownRemoteIds.add(record.id);
           persistKnownRemoteIds();
         }
-        upsertMessage(record);
+        hydrateIncomingMessage(record)
+          .then((hydrated) => upsertMessage(hydrated))
+          .catch((error) => console.error(error));
       }
     } catch (error) {
       console.error(error);
@@ -1074,9 +1130,118 @@ async function exportHistory() {
 function buildTranscript() {
   return state.messages.map((message) => {
     const header = `[${formatDate(message.timestamp)}] ${message.sender} ${message.type}`;
-    const body = message.type === 'image' ? message.content || 'imagen-pendiente' : message.content;
+    const body = message.type === 'image'
+      ? message.content || 'imagen-pendiente'
+      : message.display_content || message.content;
     return `${header}\n${body}\n`;
   }).join('\n');
+}
+
+function isE2EEEnabled() {
+  return Boolean(state.config.e2eePassphrase);
+}
+
+function resetE2EECache() {
+  state.e2eeKeyPromise = null;
+  state.e2eeKeyFingerprint = '';
+}
+
+async function getE2EEKey() {
+  if (!isE2EEEnabled()) {
+    return null;
+  }
+  const fingerprint = `${state.config.sessionId}|${state.config.e2eePassphrase}`;
+  if (state.e2eeKeyPromise && state.e2eeKeyFingerprint === fingerprint) {
+    return state.e2eeKeyPromise;
+  }
+  state.e2eeKeyFingerprint = fingerprint;
+  state.e2eeKeyPromise = deriveAesKey(state.config.e2eePassphrase, state.config.sessionId);
+  return state.e2eeKeyPromise;
+}
+
+async function deriveAesKey(passphrase, sessionId) {
+  const encoder = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey('raw', encoder.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({
+    name: 'PBKDF2',
+    salt: encoder.encode(`chat-lite-e2ee|${sessionId}`),
+    iterations: 150000,
+    hash: 'SHA-256'
+  }, baseKey, {
+    name: 'AES-GCM',
+    length: 256
+  }, false, ['encrypt', 'decrypt']);
+}
+
+async function encodeOutgoingText(plainText) {
+  if (!isE2EEEnabled()) {
+    return { wire: plainText, encrypted: false };
+  }
+  const key = await getE2EEKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const payloadBytes = new TextEncoder().encode(plainText);
+  const cipherBuffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, payloadBytes);
+  const packed = toBase64(JSON.stringify({
+    iv: toBase64(iv),
+    ct: toBase64(new Uint8Array(cipherBuffer))
+  }));
+  return {
+    wire: `${ENC_PREFIX}${packed}`,
+    encrypted: true
+  };
+}
+
+async function hydrateIncomingMessage(message) {
+  const hydrated = { ...message };
+  if (hydrated.type !== 'text') {
+    return hydrated;
+  }
+  const decoded = await decodeIncomingText(hydrated.content || '');
+  hydrated.display_content = decoded.text;
+  hydrated.encrypted = decoded.encrypted;
+  return hydrated;
+}
+
+async function decodeIncomingText(content) {
+  if (!content.startsWith(ENC_PREFIX)) {
+    return { text: content, encrypted: false };
+  }
+  if (!isE2EEEnabled()) {
+    return { text: '[Mensaje cifrado. Configura la clave E2E para leerlo.]', encrypted: true };
+  }
+  try {
+    const key = await getE2EEKey();
+    const packed = JSON.parse(fromBase64(content.slice(ENC_PREFIX.length)));
+    const iv = fromBase64ToBytes(packed.iv);
+    const ct = fromBase64ToBytes(packed.ct);
+    const plainBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+    return { text: new TextDecoder().decode(plainBuffer), encrypted: true };
+  } catch {
+    return { text: '[No se pudo descifrar este mensaje.]', encrypted: true };
+  }
+}
+
+function toBase64(input) {
+  const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : input;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function fromBase64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function fromBase64(base64) {
+  const bytes = fromBase64ToBytes(base64);
+  return new TextDecoder().decode(bytes);
 }
 
 function downloadTranscript() {
