@@ -14,7 +14,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v10';
+const APP_VERSION = '2026-08-08-v11';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -746,7 +746,7 @@ function ensureIdentitySelected() {
   return new Promise((resolve) => {
     const deviceId = ensureDeviceId();
     const byDevice = normalizeIdentity(state.identityByDevice[deviceId] || '');
-    const previous = byDevice || normalizeIdentity(state.identity || '');
+    const previous = byDevice;
     if (previous) {
       state.identity = previous;
       state.config.senderId = previous;
@@ -761,6 +761,13 @@ function ensureIdentitySelected() {
       resolve();
       return;
     }
+
+    state.identity = '';
+    state.config.senderId = '';
+    saveJson(STORAGE_KEYS.identity, state.identity);
+    saveJson(STORAGE_KEYS.config, state.config);
+    elements.senderId.value = '';
+    elements.identityCustom.value = '';
 
     setIdentityGateVisible(true);
 
