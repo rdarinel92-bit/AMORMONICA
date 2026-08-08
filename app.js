@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v29';
+const APP_VERSION = '2026-08-08-v30';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -3092,17 +3092,29 @@ async function refreshHistory(options = {}) {
     const hasMore = !all && fetched.length > HISTORY_PAGE_SIZE;
     const remoteMessages = hasMore ? fetched.slice(0, HISTORY_PAGE_SIZE) : fetched;
     const remoteLocalIds = new Set();
+    
+    // Insert messages quickly WITHOUT waiting for full hydration
+    // This makes the UI feel responsive even with E2E decoding overhead
     for (const rawMessage of remoteMessages) {
-      const message = await hydrateIncomingMessage(rawMessage);
-      if (message.id) {
-        state.knownRemoteIds.add(message.id);
+      if (rawMessage.id) {
+        state.knownRemoteIds.add(rawMessage.id);
       }
-      if (message.local_id) {
-        remoteLocalIds.add(message.local_id);
+      const tempMessageId = rawMessage.local_id || rawMessage.id || `${Date.now()}-${Math.random()}`;
+      if (tempMessageId) {
+        remoteLocalIds.add(tempMessageId);
       }
-      upsertMessage(message);
-      syncMessageReceipt(message);
+      // Upsert without awaiting full hydration
+      upsertMessage(rawMessage);
+      syncMessageReceipt(rawMessage);
     }
+    
+    // Start E2E decoding in background (non-blocking)
+    if (remoteMessages.length > 0) {
+      hydrateMessagesBackground(remoteMessages).catch((error) => {
+        console.error('Background hydration error:', error);
+      });
+    }
+    
     if (all) {
       pruneMissingSessionMessages(remoteLocalIds);
     }
@@ -3125,6 +3137,10 @@ async function refreshHistory(options = {}) {
     persistKnownRemoteIds();
     state.lastSyncAt = new Date().toISOString();
     updateSyncSummary();
+    
+    // Render NOW with unhydrated messages (text shows raw/encrypted)
+    renderMessages();
+    
     if (!silent) {
       setComposerHint(all ? 'Historial completo cargado.' : 'Historial reciente cargado.');
     }
@@ -3132,6 +3148,22 @@ async function refreshHistory(options = {}) {
     console.error(error);
     if (!silent) {
       setComposerHint('No se pudo cargar el historial.');
+    }
+  }
+}
+
+async function hydrateMessagesBackground(rawMessages) {
+  // Hydrate messages in background without blocking
+  for (const rawMessage of rawMessages) {
+    try {
+      const hydrated = await hydrateIncomingMessage(rawMessage);
+      // Update the message with decrypted content if it changed
+      if (hydrated.display_content !== rawMessage.display_content) {
+        upsertMessage(hydrated);
+        renderMessages(); // Re-render to show decrypted content
+      }
+    } catch (error) {
+      console.error('Error hydrating message:', error);
     }
   }
 }
