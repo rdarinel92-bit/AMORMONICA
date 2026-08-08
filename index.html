@@ -12,7 +12,7 @@
   <title>Chat Privado Ligero</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=12">
+  <link rel="stylesheet" href="styles.css?v=13">
 </head>
 <body>
   <main class="app">
@@ -28,7 +28,7 @@
         </button>
         <button id="share-chat" type="button" class="button ghost" aria-label="Compartir chat o enlace">↗</button>
         <button id="install-app" type="button" class="button ghost" hidden aria-hidden="true">Instalar</button>
-        <button id="toggle-setup" type="button" class="button ghost" aria-hidden="false">Config</button>
+        <button id="toggle-setup" type="button" class="button ghost" hidden aria-hidden="true">Config</button>
       </div>
     </header>
 
@@ -39,12 +39,41 @@
         <span class="profile-camera-icon">📷</span>
       </button>
       <div id="profile-menu" class="profile-menu" role="menu" hidden>
+        <button id="profile-open-settings" class="profile-menu-item" type="button" role="menuitem">⚙ Ajustes del perfil</button>
+        <button id="profile-open-advanced" class="profile-menu-item" type="button" role="menuitem">🔐 Configuración técnica</button>
         <button id="profile-switch-user" class="profile-menu-item" type="button" role="menuitem">↩ Salir</button>
         <button id="profile-change-photo" class="profile-menu-item" type="button" role="menuitem">Cambiar imagen</button>
         <button id="profile-clear-photo" class="profile-menu-item danger" type="button" role="menuitem">Quitar imagen</button>
       </div>
       <input id="profile-photo-input" type="file" accept="image/*" hidden>
     </div>
+
+    <section id="profile-settings-panel" class="profile-settings-panel" hidden aria-hidden="true" aria-label="Ajustes del perfil">
+      <div class="profile-settings-card">
+        <div class="profile-settings-header">
+          <h3>Ajustes del perfil</h3>
+          <button id="profile-settings-close" class="button ghost" type="button" aria-label="Cerrar ajustes">✕</button>
+        </div>
+        <p class="setup-note">Configuración personal de este perfil. No afecta al otro usuario.</p>
+        <form id="profile-settings-form" class="config-form">
+          <label>
+            Perfil activo
+            <input id="profile-settings-name" type="text" readonly>
+          </label>
+          <label>
+            Mensaje de entrada del perfil
+            <input id="profile-settings-entry-message" type="text" maxlength="140" placeholder="Mensaje al entrar al chat">
+          </label>
+          <label class="toggle-chip profile-settings-toggle">
+            <input id="profile-settings-haptics" type="checkbox">
+            <span>Vibración para este perfil</span>
+          </label>
+          <div class="setup-actions">
+            <button id="profile-settings-save" class="button" type="submit">Guardar perfil</button>
+          </div>
+        </form>
+      </div>
+    </section>
 
     <section id="identity-gate" class="identity-gate" hidden>
       <div class="identity-card">
@@ -268,6 +297,6 @@
     </article>
   </template>
 
-  <script src="app.js?v=35"></script>
+  <script src="app.js?v=36"></script>
 </body>
 </html>

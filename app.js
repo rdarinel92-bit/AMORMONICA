@@ -11,13 +11,14 @@ const STORAGE_KEYS = {
   forceImages: 'chat-lite-force-images',
   dataSaver: 'chat-lite-data-saver',
   haptics: 'chat-lite-haptics',
+  profileHaptics: 'chat-lite-profile-haptics',
   e2eeUnlockUntil: 'chat-lite-e2ee-unlock-until',
   profilePhoto: 'chat-lite-profile-photo',
   identityEntryMessage: 'chat-lite-identity-entry-message',
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v35';
+const APP_VERSION = '2026-08-08-v36';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -232,9 +233,17 @@ const elements = {
   profileTriggerFloating: document.getElementById('profile-trigger-floating'),
   profileTriggerTopbar: document.getElementById('profile-trigger-topbar'),
   profileMenu: document.getElementById('profile-menu'),
+  profileOpenSettings: document.getElementById('profile-open-settings'),
+  profileOpenAdvanced: document.getElementById('profile-open-advanced'),
   profileSwitchUser: document.getElementById('profile-switch-user'),
   profileChangePhoto: document.getElementById('profile-change-photo'),
   profileClearPhoto: document.getElementById('profile-clear-photo'),
+  profileSettingsPanel: document.getElementById('profile-settings-panel'),
+  profileSettingsForm: document.getElementById('profile-settings-form'),
+  profileSettingsClose: document.getElementById('profile-settings-close'),
+  profileSettingsName: document.getElementById('profile-settings-name'),
+  profileSettingsEntryMessage: document.getElementById('profile-settings-entry-message'),
+  profileSettingsHaptics: document.getElementById('profile-settings-haptics'),
   profileAvatarImg: document.getElementById('profile-avatar-img'),
   profileAvatarFallback: document.getElementById('profile-avatar-fallback'),
   profileAvatarImgTopbar: document.getElementById('profile-avatar-img-topbar'),
@@ -526,6 +535,7 @@ function bindUi() {
     elements.haptics.addEventListener('change', () => {
       state.haptics = Boolean(elements.haptics.checked);
       saveJson(STORAGE_KEYS.haptics, state.haptics);
+      saveProfileHapticsPreference(state.haptics);
       if (state.haptics && navigator.vibrate) {
         navigator.vibrate(14);
       }
@@ -704,9 +714,43 @@ function bindUi() {
   });
 
   elements.toggleSetup.addEventListener('click', () => {
-    elements.setupPanel.hidden = !elements.setupPanel.hidden;
-    elements.setupPanel.setAttribute('aria-hidden', elements.setupPanel.hidden ? 'true' : 'false');
+    toggleAdvancedSetupPanel();
   });
+
+  if (elements.profileOpenSettings) {
+    elements.profileOpenSettings.addEventListener('click', () => {
+      hideProfileMenu();
+      openProfileSettingsPanel();
+    });
+  }
+
+  if (elements.profileOpenAdvanced) {
+    elements.profileOpenAdvanced.addEventListener('click', () => {
+      hideProfileMenu();
+      openAdvancedSetupPanel();
+    });
+  }
+
+  if (elements.profileSettingsClose) {
+    elements.profileSettingsClose.addEventListener('click', () => {
+      closeProfileSettingsPanel();
+    });
+  }
+
+  if (elements.profileSettingsPanel) {
+    elements.profileSettingsPanel.addEventListener('click', (event) => {
+      if (event.target === elements.profileSettingsPanel) {
+        closeProfileSettingsPanel();
+      }
+    });
+  }
+
+  if (elements.profileSettingsForm) {
+    elements.profileSettingsForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      saveProfileSettingsFromPanel();
+    });
+  }
 
   elements.toggleConfigLock.addEventListener('click', () => {
     state.configLocked = !state.configLocked;
@@ -1196,6 +1240,92 @@ function setIdentityGateVisible(visible) {
   }
 }
 
+function toggleAdvancedSetupPanel() {
+  elements.setupPanel.hidden = !elements.setupPanel.hidden;
+  elements.setupPanel.setAttribute('aria-hidden', elements.setupPanel.hidden ? 'true' : 'false');
+}
+
+function openAdvancedSetupPanel() {
+  elements.setupPanel.hidden = false;
+  elements.setupPanel.setAttribute('aria-hidden', 'false');
+}
+
+function profileHapticsStorageKey(identityValue = '') {
+  const identity = normalizeIdentity(identityValue || state.config.senderId || state.identity || '');
+  return `${STORAGE_KEYS.profileHaptics}:${identity || 'anon'}`;
+}
+
+function loadProfileHapticsPreference(identityValue = '') {
+  const fallback = loadJson(STORAGE_KEYS.haptics, false);
+  return loadJson(profileHapticsStorageKey(identityValue), fallback);
+}
+
+function saveProfileHapticsPreference(value, identityValue = '') {
+  saveJson(profileHapticsStorageKey(identityValue), Boolean(value));
+}
+
+function openProfileSettingsPanel() {
+  const identity = normalizeIdentity(state.config.senderId || state.identity || '');
+  if (!identity) {
+    setComposerHint('Selecciona un perfil antes de abrir sus ajustes.');
+    return;
+  }
+  if (elements.profileSettingsName) {
+    elements.profileSettingsName.value = formatUserName(identity);
+  }
+  if (elements.profileSettingsEntryMessage) {
+    elements.profileSettingsEntryMessage.value = getIdentityCustomEntryMessage(identity);
+  }
+  if (elements.profileSettingsHaptics) {
+    elements.profileSettingsHaptics.checked = loadProfileHapticsPreference(identity);
+  }
+  if (elements.profileSettingsPanel) {
+    elements.profileSettingsPanel.hidden = false;
+    elements.profileSettingsPanel.setAttribute('aria-hidden', 'false');
+  }
+}
+
+function closeProfileSettingsPanel() {
+  if (!elements.profileSettingsPanel) {
+    return;
+  }
+  elements.profileSettingsPanel.hidden = true;
+  elements.profileSettingsPanel.setAttribute('aria-hidden', 'true');
+}
+
+function saveProfileSettingsFromPanel() {
+  const identity = normalizeIdentity(state.config.senderId || state.identity || '');
+  if (!identity) {
+    return;
+  }
+
+  if (elements.profileSettingsEntryMessage) {
+    const rawMessage = String(elements.profileSettingsEntryMessage.value || '').trim();
+    const key = identityEntryMessageStorageKey(identity);
+    if (rawMessage) {
+      localStorage.setItem(key, rawMessage.slice(0, 140));
+    } else {
+      localStorage.removeItem(key);
+    }
+    if (elements.identityEntryCustomMessage) {
+      elements.identityEntryCustomMessage.value = rawMessage;
+    }
+  }
+
+  if (elements.profileSettingsHaptics) {
+    const nextHaptics = Boolean(elements.profileSettingsHaptics.checked);
+    saveProfileHapticsPreference(nextHaptics, identity);
+    state.haptics = nextHaptics;
+    saveJson(STORAGE_KEYS.haptics, state.haptics);
+    if (elements.haptics) {
+      elements.haptics.checked = state.haptics;
+    }
+  }
+
+  closeProfileSettingsPanel();
+  setComposerHint('Ajustes del perfil guardados.');
+}
+
 function normalizeIdentity(value) {
   return String(value || '')
     .trim()
@@ -1215,6 +1345,10 @@ function formatUserName(value) {
 
 function updateActiveUserUi() {
   elements.activeUser.textContent = formatUserName(state.config.senderId || state.identity);
+  state.haptics = loadProfileHapticsPreference();
+  if (elements.haptics) {
+    elements.haptics.checked = state.haptics;
+  }
   // Clear any previous avatar to prevent cross-contamination between users
   elements.profileAvatarImg.removeAttribute('src');
   elements.profileAvatarImg.style.opacity = '0';

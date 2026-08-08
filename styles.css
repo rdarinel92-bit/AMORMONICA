@@ -505,6 +505,50 @@ body.identity-lock .app > :not(.identity-gate) {
   margin-bottom: 12px;
 }
 
+.profile-settings-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(76, 194, 255, 0.12), transparent 36%),
+    rgba(8, 11, 16, 0.84);
+  backdrop-filter: blur(6px);
+}
+
+.profile-settings-panel[hidden] {
+  display: none !important;
+}
+
+.profile-settings-card {
+  width: min(520px, 100%);
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(23, 27, 35, 0.98), rgba(16, 20, 28, 0.98));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.profile-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.profile-settings-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.profile-settings-toggle {
+  width: fit-content;
+}
+
 .setup-panel h2 {
   margin: 0 0 8px;
   font-size: 1rem;
