@@ -34,7 +34,7 @@ const PROBE_HISTORY = 8;
 const IMAGE_UPLOAD_MAX_RETRIES = 0;
 const IMAGE_UPLOAD_RETRY_BASE_MS = 1500;
 const IMAGE_UPLOAD_RETRY_MAX_MS = 60000;
-const IMAGE_DRAFT_PREVIEW_ENABLED = false;
+const IMAGE_DRAFT_PREVIEW_ENABLED = true;
 const VOICE_MAX_SECONDS = 120;
 const VOICE_MIN_BYTES = 400;
 const VOICE_BITRATE_KBPS_LOW = 16;
@@ -1065,7 +1065,6 @@ function bindUi() {
     }
 
     if (!IMAGE_DRAFT_PREVIEW_ENABLED) {
-      closImageDraftPanel();
       const incoming = files.map((file) => ({ file }));
       state.imageDraftQueue = [...state.imageDraftQueue, ...incoming];
       setComposerHint(`Cola de imágenes: ${state.imageDraftQueue.length}. Enviando...`);
