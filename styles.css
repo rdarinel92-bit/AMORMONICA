@@ -811,6 +811,10 @@ pre {
   align-items: center;
 }
 
+#image-draft-panel[hidden] {
+  display: none !important;
+}
+
 .draft-preview {
   display: flex;
   align-items: center;

@@ -14,7 +14,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v9';
+const APP_VERSION = '2026-08-08-v10';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
