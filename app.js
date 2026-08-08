@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v22';
+const APP_VERSION = '2026-08-08-v23';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -66,6 +66,7 @@ const defaultConfig = {
 
 const state = {
   config: { ...defaultConfig, ...loadJson(STORAGE_KEYS.config, {}) },
+  unreadCount: 0,
   configLocked: loadJson(STORAGE_KEYS.configLocked, true),
   identity: loadJson(STORAGE_KEYS.identity, ''),
   mode: 'Sin configurar',
@@ -647,7 +648,13 @@ function bindUi() {
     if (document.hidden) {
       stopVoiceRecording().catch(() => {
       });
+    } else {
+      clearUnreadBadge();
     }
+  });
+
+  window.addEventListener('focus', () => {
+    clearUnreadBadge();
   });
 
   window.addEventListener('beforeunload', () => {
@@ -3406,6 +3413,76 @@ function statusRank(status) {
   return 0;
 }
 
+function notifyIncomingMessage(message) {
+  state.unreadCount += 1;
+  updateTitleBadge();
+
+  if (state.haptics && navigator.vibrate) {
+    navigator.vibrate(message.type === 'audio' ? [12, 60, 12] : [18]);
+  }
+
+  playNotificationTone(message.type);
+
+  const label = message.type === 'audio'
+    ? `🎤 Nota de voz de ${formatUserName(message.sender || '')}`
+    : message.type === 'image'
+      ? `📷 Imagen de ${formatUserName(message.sender || '')}`
+      : `💬 ${formatUserName(message.sender || '')}: ${String(message.display_content || message.content || '').slice(0, 60)}`;
+
+  setComposerHint(label);
+}
+
+function updateTitleBadge() {
+  const base = 'Chat Privado Ligero';
+  document.title = state.unreadCount > 0 ? `(${state.unreadCount}) ${base}` : base;
+}
+
+function clearUnreadBadge() {
+  state.unreadCount = 0;
+  updateTitleBadge();
+}
+
+function playNotificationTone(type) {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      return;
+    }
+    const ctx = new AudioCtx();
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+
+    if (type === 'audio') {
+      const freqs = [660, 880];
+      freqs.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.12);
+        gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.12);
+        gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + i * 0.12 + 0.02);
+        gain.gain.linearRampToValueAtTime(0, ctx.currentTime + i * 0.12 + 0.13);
+        osc.connect(gain);
+        osc.start(ctx.currentTime + i * 0.12);
+        osc.stop(ctx.currentTime + i * 0.12 + 0.14);
+      });
+    } else {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(type === 'image' ? 740 : 820, ctx.currentTime);
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.22, ctx.currentTime + 0.018);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.12);
+      osc.connect(gain);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.13);
+    }
+
+    window.setTimeout(() => ctx.close(), 600);
+  } catch (_error) {
+    // audio not available
+  }
+}
+
 function syncMessageReceipt(message) {
   if (!state.online || !isConfigured() || isOwnMessage(message) || !message.local_id) {
     return;
@@ -3522,8 +3599,12 @@ function connectRealtime() {
         }
         hydrateIncomingMessage(record)
           .then((hydrated) => {
+            const isNew = !state.messages.some((item) => item.local_id === hydrated.local_id && item.status === hydrated.status);
             upsertMessage(hydrated);
             syncMessageReceipt(hydrated);
+            if (isNew && hydrated.sender !== state.config.senderId) {
+              notifyIncomingMessage(hydrated);
+            }
           })
           .catch((error) => console.error(error));
       }
