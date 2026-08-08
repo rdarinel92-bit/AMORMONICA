@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v27';
+const APP_VERSION = '2026-08-08-v28';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -117,7 +117,11 @@ const state = {
   voiceStream: null,
   voiceChunks: [],
   voiceStartedAt: 0,
-  voiceStopTimer: null
+  voiceStopTimer: null,
+  // Typing indicators
+  typingState: new Map(), // Map of sender -> timestamp
+  typingDebounceTimer: null,
+  myLastTypingAt: 0
 };
 
 const EMOJI_CATEGORIES = {
@@ -227,7 +231,8 @@ const elements = {
   emojiToggle: document.getElementById('emoji-toggle'),
   emojiPanelClose: document.getElementById('emoji-panel-close'),
   voiceRecord: document.getElementById('voice-record'),
-  loadMoreHistory: document.getElementById('load-more-history')
+  loadMoreHistory: document.getElementById('load-more-history'),
+  typingStatusIndicator: document.getElementById('typing-status-indicator')
 };
 
 boot().catch((error) => {
@@ -989,6 +994,9 @@ function bindUi() {
       handleReconnect({ soft: true }).catch((error) => console.error(error));
     }
   });
+
+  // Attach typing status listeners
+  attachTypingStatusListeners();
 }
 
 async function handleReconnect(options = {}) {
@@ -3622,6 +3630,27 @@ function connectRealtime() {
       },
       ref: '1'
     }));
+
+    // Subscribe to typing status changes
+    socket.send(JSON.stringify({
+      topic: 'realtime:public:typing_status',
+      event: 'phx_join',
+      payload: {
+        config: {
+          broadcast: { self: false },
+          postgres_changes: [
+            {
+              event: '*',
+              schema: 'public',
+              table: 'typing_status',
+              filter: `session_id=eq.${state.config.sessionId}`
+            }
+          ]
+        }
+      },
+      ref: '2'
+    }));
+
     state.heartbeatTimer = window.setInterval(() => {
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(Date.now()) }));
@@ -3638,6 +3667,13 @@ function connectRealtime() {
         const oldRecord = change.old_record || change.old || null;
         const eventType = String(change.eventType || data.type || data.eventType || '').toUpperCase();
 
+        // Handle typing status changes
+        if (data.topic && data.topic.includes('typing_status')) {
+          handleTypingStatusChange(record, eventType);
+          return;
+        }
+
+        // Handle message changes
         if (eventType === 'DELETE' || (!record && oldRecord)) {
           const target = oldRecord || record;
           if (target && target.session_id === state.config.sessionId) {
@@ -3679,6 +3715,129 @@ function connectRealtime() {
 
   socket.addEventListener('error', () => {
     clearRealtimeTimers();
+  });
+}
+
+function handleTypingStatusChange(record, eventType) {
+  if (!record || !record.sender || record.session_id !== state.config.sessionId) {
+    return;
+  }
+
+  const sender = record.sender;
+  const isOwnStatus = sender === state.config.senderId;
+  
+  // Ignore our own typing status updates
+  if (isOwnStatus) {
+    return;
+  }
+
+  if (eventType === 'DELETE' || !record.is_typing) {
+    state.typingState.delete(sender);
+  } else {
+    state.typingState.set(sender, Date.now());
+  }
+
+  updateTypingIndicator();
+}
+
+function updateTypingIndicator() {
+  const now = Date.now();
+  const TYPING_TIMEOUT = 3000; // 3 seconds
+
+  // Remove expired typing statuses
+  for (const [sender, timestamp] of state.typingState.entries()) {
+    if (now - timestamp > TYPING_TIMEOUT) {
+      state.typingState.delete(sender);
+    }
+  }
+
+  const indicator = elements.typingStatusIndicator || document.getElementById('typing-status-indicator');
+  if (!indicator) {
+    return;
+  }
+
+  if (state.typingState.size === 0) {
+    indicator.hidden = true;
+    return;
+  }
+
+  const typingUsers = Array.from(state.typingState.keys());
+  const typingText = indicator.querySelector('.typing-status-text');
+  
+  if (typingUsers.length === 1) {
+    typingText.textContent = `${formatUserName(typingUsers[0])} está escribiendo...`;
+  } else if (typingUsers.length === 2) {
+    typingText.textContent = `${formatUserName(typingUsers[0])} y ${formatUserName(typingUsers[1])} están escribiendo...`;
+  } else {
+    typingText.textContent = `${typingUsers.length} personas están escribiendo...`;
+  }
+
+  indicator.hidden = false;
+}
+
+async function sendTypingStatus(isTyping) {
+  if (!isConfigured() || !state.config.supabaseUrl) {
+    return;
+  }
+
+  try {
+    const now = Date.now();
+    const minInterval = 500; // Don't send more than every 500ms when typing
+    
+    if (isTyping && now - state.myLastTypingAt < minInterval) {
+      return; // Skip if we just sent a status
+    }
+
+    state.myLastTypingAt = now;
+
+    const response = await fetch(`${state.config.supabaseUrl}/rest/v1/typing_status`, {
+      method: 'POST',
+      headers: {
+        'apikey': state.config.supabaseKey,
+        'Authorization': `Bearer ${state.config.supabaseKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates' // Upsert behavior
+      },
+      body: JSON.stringify({
+        sender: state.config.senderId,
+        session_id: state.config.sessionId,
+        is_typing: isTyping
+      })
+    });
+
+    if (!response.ok && response.status !== 409) {
+      console.warn('Failed to send typing status:', response.statusText);
+    }
+  } catch (error) {
+    console.error('Error sending typing status:', error);
+  }
+}
+
+function attachTypingStatusListeners() {
+  const messageInput = elements.messageInput || document.getElementById('message-input');
+  if (!messageInput) {
+    return;
+  }
+
+  let isCurrentlyTyping = false;
+
+  messageInput.addEventListener('input', () => {
+    const hasText = messageInput.value.trim().length > 0;
+    
+    if (hasText && !isCurrentlyTyping) {
+      isCurrentlyTyping = true;
+      sendTypingStatus(true);
+    } else if (!hasText && isCurrentlyTyping) {
+      isCurrentlyTyping = false;
+      sendTypingStatus(false);
+    }
+  });
+
+  messageInput.addEventListener('blur', () => {
+    if (isCurrentlyTyping) {
+      isCurrentlyTyping = false;
+      sendTypingStatus(false);
+    }
   });
 }
 
