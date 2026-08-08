@@ -675,12 +675,43 @@ textarea:focus {
 }
 
 .message-meta {
+  display: none;
+}
+
+.message-footer {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 0.8rem;
-  color: var(--muted);
-  margin-bottom: 6px;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.45);
+  line-height: 1;
+  user-select: none;
+}
+
+.message.mine::after {
+  content: '';
+  position: absolute;
+  bottom: 8px;
+  right: -7px;
+  border: 7px solid transparent;
+  border-left-color: #163248;
+  border-right-width: 0;
+}
+
+.message.theirs::after {
+  content: '';
+  position: absolute;
+  bottom: 8px;
+  left: -7px;
+  border: 7px solid transparent;
+  border-right-color: #1b2130;
+  border-left-width: 0;
+}
+
+.message.theirs .message-footer .message-state {
+  display: none;
 }
 
 .message.mine .message-state[data-state='sent'],

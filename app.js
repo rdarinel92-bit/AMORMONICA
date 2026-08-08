@@ -22,7 +22,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v49';
+const APP_VERSION = '2026-08-08-v50';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -4581,10 +4581,12 @@ async function notifySystemMessage(message, label) {
   const targetUrl = getShareUrl();
   const options = {
     body,
-    icon: 'icon.svg',
-    badge: 'icon.svg',
+    icon: 'icon-192.png',
+    badge: 'icon-192.png',
     tag: `chat-${state.config.sessionId || 'sala'}`,
-    renotify: false,
+    renotify: true,
+    vibrate: [180, 80, 180],
+    silent: false,
     data: {
       url: targetUrl
     }
@@ -4613,6 +4615,13 @@ async function notifySystemMessage(message, label) {
 function updateTitleBadge() {
   const base = 'Chat Privado Ligero';
   document.title = state.unreadCount > 0 ? `(${state.unreadCount}) ${base}` : base;
+  if ('setAppBadge' in navigator) {
+    if (state.unreadCount > 0) {
+      navigator.setAppBadge(state.unreadCount).catch(() => {});
+    } else {
+      navigator.clearAppBadge().catch(() => {});
+    }
+  }
 }
 
 function clearUnreadBadge() {
