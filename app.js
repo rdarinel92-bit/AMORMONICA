@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v28';
+const APP_VERSION = '2026-08-08-v29';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -1661,7 +1661,17 @@ async function saveProfilePhoto(file) {
     syncProfileAvatarVisibility();
 
     const optimizedDataUrl = await optimizeProfilePhoto(file);
+    
+    // Save to localStorage first (quick fallback)
     localStorage.setItem(profilePhotoStorageKey(), optimizedDataUrl);
+    
+    // Save to Supabase in background
+    if (isConfigured()) {
+      saveProfilePhotoToSupabase(optimizedDataUrl).catch((error) => {
+        console.error('Failed to save profile to Supabase:', error);
+      });
+    }
+    
     elements.profileAvatarImg.src = optimizedDataUrl;
     if (elements.profileAvatarImgTopbar) {
       elements.profileAvatarImgTopbar.src = optimizedDataUrl;
@@ -1694,20 +1704,20 @@ function loadProfilePhoto() {
 
     updateProfileFallbackInitial();
     
-    // Get the CORRECT key for this specific user
+    // Try to load from localStorage first (fast)
     const correctKey = profilePhotoStorageKey();
-    const photoDataUrl = localStorage.getItem(correctKey);
+    const localPhotoDataUrl = localStorage.getItem(correctKey);
     
-    if (photoDataUrl) {
-      // User has a profile photo
-      elements.profileAvatarImg.src = photoDataUrl;
+    if (localPhotoDataUrl) {
+      // User has a profile photo in localStorage
+      elements.profileAvatarImg.src = localPhotoDataUrl;
       elements.profileAvatarImg.style.opacity = '1';
       if (elements.profileAvatarImgTopbar) {
-        elements.profileAvatarImgTopbar.src = photoDataUrl;
+        elements.profileAvatarImgTopbar.src = localPhotoDataUrl;
         elements.profileAvatarImgTopbar.style.opacity = '1';
       }
     } else {
-      // User has no profile photo, show initials
+      // User has no local photo, show initials
       elements.profileAvatarImg.removeAttribute('src');
       elements.profileAvatarImg.style.opacity = '0';
       if (elements.profileAvatarImgTopbar) {
@@ -1716,6 +1726,11 @@ function loadProfilePhoto() {
       }
     }
     syncProfileAvatarVisibility();
+    
+    // Load from Supabase in background (refreshes remote photos)
+    loadProfilePhotoFromSupabase(activeIdentity).catch((error) => {
+      console.error('Failed to load profile from Supabase:', error);
+    });
   } catch (error) {
     console.error('Error loading profile photo:', error);
   }
@@ -4515,6 +4530,83 @@ function toggleProfileMenu() {
     return;
   }
   showProfileMenu();
+}
+
+async function saveProfilePhotoToSupabase(dataUrl) {
+  if (!isConfigured()) {
+    return;
+  }
+  try {
+    const sender = state.config.senderId;
+    const sessionId = state.config.sessionId;
+    
+    if (!sender || !sessionId) {
+      return;
+    }
+
+    // Use upsert to update or insert
+    const response = await fetch(`${state.config.supabaseUrl}/rest/v1/user_profiles?on_conflict=sender`, {
+      method: 'POST',
+      headers: {
+        'apikey': state.config.supabaseKey,
+        'Authorization': `Bearer ${state.config.supabaseKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        sender: sender,
+        session_id: sessionId,
+        avatar_data: dataUrl,
+        avatar_mime: 'image/jpeg'
+      })
+    });
+
+    if (!response.ok) {
+      console.warn('Failed to save profile to Supabase:', response.statusText);
+    }
+  } catch (error) {
+    console.error('Error saving profile to Supabase:', error);
+  }
+}
+
+async function loadProfilePhotoFromSupabase(sender) {
+  if (!isConfigured() || !sender) {
+    return;
+  }
+  try {
+    const filter = encodeURIComponent(`sender=eq.${sender}`);
+    const url = `${state.config.supabaseUrl}/rest/v1/user_profiles?${filter}`;
+    
+    const response = await fetch(url, {
+      headers: supabaseHeaders()
+    });
+
+    if (!response.ok) {
+      return; // No profile found, that's OK
+    }
+
+    const rows = await response.json();
+    if (rows.length === 0) {
+      return; // No profile data, that's OK
+    }
+
+    const profile = rows[0];
+    if (profile.avatar_data) {
+      // Update localStorage with Supabase data
+      localStorage.setItem(profilePhotoStorageKey(), profile.avatar_data);
+      
+      // Update UI
+      elements.profileAvatarImg.src = profile.avatar_data;
+      elements.profileAvatarImg.style.opacity = '1';
+      if (elements.profileAvatarImgTopbar) {
+        elements.profileAvatarImgTopbar.src = profile.avatar_data;
+        elements.profileAvatarImgTopbar.style.opacity = '1';
+      }
+      syncProfileAvatarVisibility();
+    }
+  } catch (error) {
+    console.error('Error loading profile from Supabase:', error);
+  }
 }
 
 function clearProfilePhoto() {
