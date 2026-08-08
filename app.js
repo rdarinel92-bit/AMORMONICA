@@ -17,7 +17,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v33';
+const APP_VERSION = '2026-08-08-v35';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -272,7 +272,9 @@ async function boot() {
   applyConfigToForm();
   setComposerLocked(true);
   await ensureIdentitySelected();
+  updateIdentityEntryLoadingStatus('Preparando cifrado de mensajes...', 36);
   await ensureE2EEUnlocked(true);
+  updateIdentityEntryLoadingStatus('Cargando datos locales...', 52);
   elements.setupRequirements.textContent = buildSetupRequirements();
   renderMessages();
   updateQueueSize();
@@ -280,13 +282,19 @@ async function boot() {
   state.db = await openDb();
   state.initialized = true;
   await restoreUploadJobs();
+  updateIdentityEntryLoadingStatus('Midiendo conexión...', 68);
   startConnectionMonitoring();
   await probeConnection();
   if (isConfigured()) {
+    updateIdentityEntryLoadingStatus('Sincronizando historial...', 84);
     await refreshHistory();
     connectRealtime();
     flushQueues();
+    updateIdentityEntryLoadingStatus('Historial listo. Entrando...', 100);
+  } else {
+    updateIdentityEntryLoadingStatus('Configuración lista. Entrando...', 100);
   }
+  finalizeIdentityEntry();
   setComposerLocked(false);
 }
 
@@ -1097,9 +1105,16 @@ function ensureIdentitySelected() {
       elements.identityCustom.value = chosen;
       syncIdentityCustomEntryMessage(chosen);
       state.pendingUrlIdentity = '';
-      setIdentityGateVisible(false);
+      setIdentityGateVisible(true);
+      runIdentityEntryProgress(chosen)
+        .catch((error) => {
+          console.error('Identity progress failed', error);
+        })
+        .finally(() => {
+          updateIdentityEntryLoadingStatus('Cargando historial...', 32);
+          resolve();
+        });
       updateActiveUserUi();
-      resolve();
       return;
     }
 
@@ -1144,10 +1159,7 @@ function ensureIdentitySelected() {
           console.error('Identity progress failed', error);
         })
         .finally(() => {
-          setIdentityGateVisible(false);
-          updateActiveUserUi();
-          setComposerHint(`Entraste como ${formatUserName(state.config.senderId)}.`);
-          resetIdentityEntryProgressUi();
+          updateIdentityEntryLoadingStatus('Cargando historial...', 32);
           resolve();
         });
     };
@@ -4868,4 +4880,28 @@ function ensureDeviceId() {
   state.deviceId = nextId;
   localStorage.setItem(STORAGE_KEYS.deviceId, nextId);
   return nextId;
+}
+
+function updateIdentityEntryLoadingStatus(text, pct) {
+  if (elements.identityEntryProgress) {
+    elements.identityEntryProgress.hidden = false;
+  }
+  if (elements.identityEntryMessage && text) {
+    elements.identityEntryMessage.textContent = text;
+  }
+  const normalizedPct = Math.max(0, Math.min(100, Number(pct) || 0));
+  if (elements.identityProgressFill) {
+    elements.identityProgressFill.style.width = `${normalizedPct}%`;
+  }
+  const track = document.querySelector('.identity-progress-track');
+  if (track) {
+    track.setAttribute('aria-valuenow', String(normalizedPct));
+  }
+}
+
+function finalizeIdentityEntry() {
+  setIdentityGateVisible(false);
+  updateActiveUserUi();
+  setComposerHint(`Entraste como ${formatUserName(state.config.senderId)}.`);
+  resetIdentityEntryProgressUi();
 }
