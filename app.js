@@ -72,7 +72,9 @@ const state = {
   e2eeKeyPromise: null,
   e2eeKeyFingerprint: '',
   lastSyncAt: null,
-  initialized: false
+  initialized: false,
+  imageDraft: null,
+  imageDraftFile: null
 };
 
 const elements = {
@@ -120,7 +122,16 @@ const elements = {
   connectionStability: document.getElementById('connection-stability'),
   connectionLoss: document.getElementById('connection-loss'),
   queueSize: document.getElementById('queue-size'),
-  composerHint: document.getElementById('composer-hint')
+  composerHint: document.getElementById('composer-hint'),
+  imageDraftPanel: document.getElementById('image-draft-panel'),
+  draftImagePreview: document.getElementById('draft-image-preview'),
+  draftSize: document.getElementById('draft-size'),
+  draftResolution: document.getElementById('draft-resolution'),
+  draftMode: document.getElementById('draft-mode'),
+  draftEstimate: document.getElementById('draft-estimate'),
+  draftSendButton: document.getElementById('draft-send'),
+  draftChangeButton: document.getElementById('draft-change'),
+  draftDiscardButton: document.getElementById('draft-discard')
 };
 
 boot().catch((error) => {
@@ -324,7 +335,23 @@ function bindUi() {
     if (!file) {
       return;
     }
-    await enqueueImageMessage(file);
+    await showImageDrafPanel(file);
+  });
+
+  elements.draftSendButton.addEventListener('click', async () => {
+    if (state.imageDraftFile) {
+      await enqueueImageMessage(state.imageDraftFile);
+      closImageDraftPanel();
+    }
+  });
+
+  elements.draftChangeButton.addEventListener('click', () => {
+    closImageDraftPanel();
+    elements.imageInput.click();
+  });
+
+  elements.draftDiscardButton.addEventListener('click', () => {
+    closImageDraftPanel();
   });
 
   elements.exportHistory.addEventListener('click', async () => {
@@ -1093,6 +1120,13 @@ async function cancelOrRemoveOwnImage(message) {
     await deleteOwnImageAssets(message).catch((error) => {
       console.error(error);
     });
+
+    imageCache.delete(message.content);
+    try {
+      await dbDelete(CACHE_STORE, message.content);
+    } catch (error) {
+      console.error(error);
+    }
   }
 
   let deleteSuccess = false;
@@ -1120,6 +1154,87 @@ async function cancelOrRemoveOwnImage(message) {
     updateQueueSize();
     setComposerHint(isPending ? 'Envio de imagen cancelado.' : 'Imagen eliminada del chat.');
   }
+}
+
+async function showImageDrafPanel(file) {
+  if (!isConfigured()) {
+    setComposerHint('Configura Supabase antes de enviar imágenes.');
+    return;
+  }
+  if (state.mode === 'Ultra-ligero' && !state.forceImages) {
+    setComposerHint('Red muy lenta: la imagen quedó bloqueada. Activa Forzar imagen si la necesitas.');
+    return;
+  }
+
+  const targetKb = getTargetImageKb();
+  setComposerHint(`Comprimiendo imagen a menos de ${targetKb} KB...`);
+
+  try {
+    const compressed = await compressImage(file, targetKb, getMaxDimensionForMode());
+    const previewUrl = URL.createObjectURL(compressed);
+
+    state.imageDraftFile = file;
+    state.imageDraft = {
+      compressed,
+      previewUrl,
+      targetKb,
+      fileName: file.name,
+      originalSize: file.size
+    };
+
+    const canvas = await getCanvasFromImageFile(compressed);
+    elements.draftImagePreview.src = previewUrl;
+    elements.draftSize.textContent = `${Math.ceil(compressed.size / 1024)} KB`;
+    elements.draftResolution.textContent = `${canvas.width} × ${canvas.height}`;
+    elements.draftMode.textContent = state.mode;
+
+    const estimatedSeconds = estimateUploadTime(compressed.size);
+    elements.draftEstimate.textContent = estimatedSeconds > 0 ? `~${estimatedSeconds}s` : 'Bajo demanda';
+
+    elements.imageDraftPanel.hidden = false;
+    setComposerHint('Listo para enviar. Revisa la imagen comprimida.');
+  } catch (error) {
+    console.error(error);
+    setComposerHint('Error al procesar imagen. Intenta otra.');
+  }
+}
+
+function closImageDraftPanel() {
+  if (state.imageDraft && state.imageDraft.previewUrl) {
+    URL.revokeObjectURL(state.imageDraft.previewUrl);
+  }
+  state.imageDraft = null;
+  state.imageDraftFile = null;
+  elements.imageDraftPanel.hidden = true;
+  elements.draftImagePreview.src = '';
+}
+
+async function getCanvasFromImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        resolve(canvas);
+      };
+      img.onerror = reject;
+      img.src = event.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function estimateUploadTime(sizeBytes) {
+  if (!state.online || state.kbps === 0) {
+    return 0;
+  }
+  const sizeKbps = (sizeBytes * 8) / 1024;
+  const seconds = Math.ceil(sizeKbps / state.kbps);
+  return Math.min(seconds, 999);
 }
 
 async function enqueueImageMessage(file) {

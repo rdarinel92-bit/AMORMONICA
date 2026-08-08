@@ -139,6 +139,35 @@
 
     <section id="chat-log" class="chat-log" aria-live="polite" aria-label="Mensajes"></section>
 
+    <section id="image-draft-panel" class="image-draft-panel" hidden aria-label="Preview de imagen">
+      <div class="draft-preview">
+        <img id="draft-image-preview" src="" alt="Preview de imagen">
+      </div>
+      <div class="draft-info">
+        <div class="draft-stat">
+          <span class="label">Tamaño</span>
+          <strong id="draft-size">0 KB</strong>
+        </div>
+        <div class="draft-stat">
+          <span class="label">Resolución</span>
+          <strong id="draft-resolution">--</strong>
+        </div>
+        <div class="draft-stat">
+          <span class="label">Modo</span>
+          <strong id="draft-mode">--</strong>
+        </div>
+        <div class="draft-stat">
+          <span class="label">Estimado</span>
+          <strong id="draft-estimate">--</strong>
+        </div>
+      </div>
+      <div class="draft-actions">
+        <button id="draft-send" class="button" type="button">✓ Enviar imagen</button>
+        <button id="draft-change" class="button ghost" type="button">🔄 Cambiar</button>
+        <button id="draft-discard" class="button ghost" type="button">✕ Descartar</button>
+      </div>
+    </section>
+
     <section class="composer composer-fixed">
       <form id="message-form" class="composer-form">
         <textarea id="message-input" rows="2" maxlength="2000" placeholder="Escribe un mensaje" spellcheck="true" autocapitalize="sentences" autocomplete="on" lang="es"></textarea>
