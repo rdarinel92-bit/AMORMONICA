@@ -1,10 +1,16 @@
 :root {
   color-scheme: light;
-  --bg: #ffffff;
-  --fg: #111111;
-  --muted: #5a5a5a;
-  --line: #d9d9d9;
-  --soft: #f5f5f5;
+  --bg: #f6f8fb;
+  --card: #ffffff;
+  --fg: #152132;
+  --muted: #5d6a7b;
+  --line: #d8e0eb;
+  --soft: #f1f5fa;
+  --accent: #1f6feb;
+  --accent-soft: #e9f1ff;
+  --shadow-sm: 0 1px 2px rgba(13, 22, 40, 0.06);
+  --shadow-md: 0 8px 24px rgba(17, 30, 48, 0.08);
+  --radius: 14px;
 }
 
 * {
@@ -22,6 +28,7 @@ body {
 
 body {
   min-height: 100vh;
+  background: linear-gradient(180deg, #f9fbff 0%, #f3f7fc 100%);
 }
 
 button,
@@ -38,7 +45,7 @@ button {
 .app {
   max-width: 860px;
   margin: 0 auto;
-  padding: 12px;
+  padding: 14px;
   position: relative;
 }
 
@@ -59,8 +66,10 @@ button {
 .identity-card {
   width: min(560px, 100%);
   border: 1px solid var(--line);
-  background: var(--bg);
-  padding: 14px;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  padding: 16px;
   display: grid;
   gap: 10px;
 }
@@ -81,8 +90,11 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 0 12px;
+  padding: 10px 10px 12px;
   border-bottom: 1px solid var(--line);
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
 }
 
 .topbar-actions {
@@ -122,11 +134,13 @@ button {
   right: 14px;
   bottom: 14px;
   z-index: 10;
-  border: 1px solid var(--fg);
-  background: var(--fg);
-  color: var(--bg);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  border-radius: 999px;
   padding: 8px 10px;
   font-size: 0.84rem;
+  box-shadow: var(--shadow-md);
 }
 
 .net-panel {
@@ -135,9 +149,11 @@ button {
   bottom: 58px;
   width: min(320px, calc(100vw - 28px));
   border: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--card);
   z-index: 10;
-  padding: 8px;
+  padding: 10px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
 }
 
 .net-summary {
@@ -151,6 +167,7 @@ button {
   border: 1px solid var(--line);
   padding: 6px;
   background: var(--soft);
+  border-radius: 10px;
 }
 
 .net-actions {
@@ -169,6 +186,7 @@ button {
   background: var(--soft);
   padding: 6px 10px;
   font-size: 0.85rem;
+  border-radius: 999px;
 }
 
 .toggle-chip input {
@@ -181,7 +199,9 @@ button {
 .message,
 .composer {
   border: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
 }
 
 .status-card {
@@ -220,9 +240,17 @@ input,
 textarea {
   width: 100%;
   border: 1px solid var(--line);
-  background: var(--bg);
+  background: #fbfdff;
   padding: 8px;
   resize: vertical;
+  border-radius: 10px;
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: #9cbcf3;
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .setup-actions,
@@ -233,16 +261,18 @@ textarea {
 }
 
 .button {
-  border: 1px solid var(--fg);
-  background: var(--fg);
-  color: var(--bg);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #ffffff;
   padding: 8px 12px;
+  border-radius: 10px;
 }
 
 .button.ghost,
 .file-button {
-  background: var(--bg);
+  background: var(--card);
   color: var(--fg);
+  border-color: var(--line);
 }
 
 .button-icon {
@@ -261,30 +291,34 @@ textarea {
 .chat-log {
   min-height: 45vh;
   border: 1px solid var(--line);
-  padding: 8px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   align-items: stretch;
+  background: linear-gradient(180deg, #fcfdff 0%, #f7f9fd 100%);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
 }
 
 .message {
   padding: 8px;
   max-width: 78%;
   width: fit-content;
+  border-radius: 12px;
 }
 
 .message.mine {
   align-self: flex-end;
   margin-left: auto;
-  border-color: #94b8a1;
-  background: #eef7f1;
+  border-color: #b8cef8;
+  background: #eaf2ff;
 }
 
 .message.theirs {
   align-self: flex-start;
   margin-right: auto;
-  background: #f8f8f8;
+  background: #ffffff;
 }
 
 .message.pending {
@@ -293,6 +327,7 @@ textarea {
 
 .message.error {
   border-color: #aa2222;
+  background: #fff3f3;
 }
 
 .message-meta {
@@ -352,14 +387,13 @@ textarea {
 
 .composer {
   margin-top: 12px;
-  padding: 8px;
+  padding: 10px;
 }
 
 .composer-fixed {
   position: sticky;
   bottom: 12px;
   z-index: 5;
-  backdrop-filter: blur(2px);
 }
 
 .composer.locked {
@@ -383,6 +417,7 @@ pre {
   border: 1px solid var(--line);
   background: var(--soft);
   padding: 8px;
+  border-radius: 10px;
 }
 
 @media (max-width: 640px) {
