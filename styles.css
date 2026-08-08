@@ -152,6 +152,16 @@ textarea {
   padding: 8px;
 }
 
+.message.mine {
+  margin-left: 36px;
+  border-color: #94b8a1;
+  background: #eef7f1;
+}
+
+.message.theirs {
+  margin-right: 36px;
+}
+
 .message.pending {
   background: var(--soft);
 }
@@ -212,6 +222,12 @@ pre {
 
   .topbar {
     flex-direction: column;
+  }
+
+  .message.mine,
+  .message.theirs {
+    margin-left: 0;
+    margin-right: 0;
   }
 }
 

@@ -312,6 +312,10 @@ function messageKey(message) {
   return message.local_id || message.id;
 }
 
+function isOwnMessage(message) {
+  return message.sender === state.config.senderId;
+}
+
 function upsertMessage(message) {
   const key = messageKey(message);
   const index = state.messages.findIndex((item) => messageKey(item) === key || (item.id && message.id && item.id === message.id));
@@ -335,9 +339,12 @@ function renderMessages() {
     const status = fragment.querySelector('.message-state');
     const body = fragment.querySelector('.message-body');
 
-    sender.textContent = message.sender || 'desconocido';
+    const own = isOwnMessage(message);
+    sender.textContent = own ? 'Tu' : (message.sender || 'desconocido');
     time.textContent = formatDate(message.timestamp || new Date().toISOString());
     status.textContent = buildStatusLabel(message);
+    root.classList.toggle('mine', own);
+    root.classList.toggle('theirs', !own);
     root.classList.toggle('pending', message.status === 'pending');
     root.classList.toggle('error', message.status === 'error');
 
@@ -358,8 +365,17 @@ function renderMessages() {
 }
 
 function buildStatusLabel(message) {
+  if (!isOwnMessage(message)) {
+    return message.status === 'read' ? 'visto' : 'recibido';
+  }
   if (message.type === 'image' && message.status === 'pending') {
     return `pendiente ${message.chunks_sent || 0}/${message.chunks_total || 0}`;
+  }
+  if (message.status === 'delivered') {
+    return 'entregado';
+  }
+  if (message.status === 'read') {
+    return 'leido';
   }
   if (message.status === 'resumed') {
     return 'reanudado';
@@ -723,6 +739,7 @@ async function refreshHistory(options = {}) {
         state.knownRemoteIds.add(message.id);
       }
       upsertMessage(message);
+      syncMessageReceipt(message);
     }
     persistKnownRemoteIds();
     if (!silent) {
@@ -787,6 +804,32 @@ async function updateMessageRemote(localId, patch) {
     const hydrated = await hydrateIncomingMessage(rows[0]);
     upsertMessage(hydrated);
   }
+}
+
+function statusRank(status) {
+  if (status === 'read') {
+    return 3;
+  }
+  if (status === 'delivered') {
+    return 2;
+  }
+  if (status === 'sent' || status === 'resumed') {
+    return 1;
+  }
+  return 0;
+}
+
+function syncMessageReceipt(message) {
+  if (!state.online || !isConfigured() || isOwnMessage(message) || !message.local_id) {
+    return;
+  }
+  const targetStatus = document.hidden ? 'delivered' : 'read';
+  if (statusRank(message.status) >= statusRank(targetStatus)) {
+    return;
+  }
+  updateMessageRemote(message.local_id, { status: targetStatus }).catch((error) => {
+    console.error(error);
+  });
 }
 
 async function uploadFileToStorage(path, blob) {
@@ -878,7 +921,10 @@ function connectRealtime() {
           persistKnownRemoteIds();
         }
         hydrateIncomingMessage(record)
-          .then((hydrated) => upsertMessage(hydrated))
+          .then((hydrated) => {
+            upsertMessage(hydrated);
+            syncMessageReceipt(hydrated);
+          })
           .catch((error) => console.error(error));
       }
     } catch (error) {
