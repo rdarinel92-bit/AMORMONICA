@@ -272,6 +272,7 @@ const elements = {
   profileSettingsRefreshInstall: document.getElementById('profile-settings-refresh-install'),
   profileSettingsInstallStatus: document.getElementById('profile-settings-install-status'),
   identityInstallApp: document.getElementById('identity-install-app'),
+  identityOpenApp: document.getElementById('identity-open-app'),
   identityInstallStatus: document.getElementById('identity-install-status'),
   profileAvatarImg: document.getElementById('profile-avatar-img'),
   profileAvatarFallback: document.getElementById('profile-avatar-fallback'),
@@ -715,6 +716,18 @@ function bindUi() {
         console.error(error);
         setComposerHint('No se pudo iniciar la instalación.');
       });
+    });
+  }
+
+  if (elements.identityOpenApp) {
+    elements.identityOpenApp.addEventListener('click', () => {
+      if (isRunningStandalone()) {
+        window.focus();
+        updateInstallStatusUi();
+        setComposerHint('App abierta.');
+        return;
+      }
+      window.location.reload();
     });
   }
 
@@ -1602,6 +1615,11 @@ function updateInstallStatusUi() {
     elements.identityInstallStatus.textContent = standalone
       ? `Ya está instalada en el teléfono. ${installMessage}`
       : `Instalar crea un acceso directo y abre la app como PWA. ${installMessage}`;
+  }
+
+  if (elements.identityOpenApp) {
+    elements.identityOpenApp.hidden = !standalone;
+    elements.identityOpenApp.disabled = !standalone;
   }
 
   const buttons = [elements.installApp, elements.identityInstallApp];

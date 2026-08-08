@@ -90,6 +90,16 @@ button {
   flex-wrap: wrap;
 }
 
+.identity-install-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.identity-install-actions .button {
+  flex: 1 1 220px;
+}
+
 .identity-profile {
   border: 1px solid var(--line);
   background: rgba(28, 35, 48, 0.86);
