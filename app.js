@@ -2366,13 +2366,17 @@ async function resetCurrentRoomForAll() {
       }
     }
 
-    await deleteMessagesByCurrentSessionRemote();
+    const deleted = await deleteMessagesByCurrentSessionRemote();
+    if (remoteMessages.length > 0 && deleted === 0) {
+      throw new Error('DELETE ejecutado pero no eliminó filas. RLS probablemente bloquea la operación.');
+    }
     await clearCurrentRoomLocalState();
     await refreshHistory({ silent: true });
     setComposerHint('Sala reiniciada para todos.');
   } catch (error) {
     console.error(error);
-    setComposerHint('No se pudo reiniciar la sala. Revisa permisos DELETE en messages y storage.objects.');
+    const detail = formatSupabaseError(error);
+    setComposerHint(`No se pudo reiniciar la sala: ${detail}`);
   } finally {
     setComposerLocked(false);
   }
@@ -2384,12 +2388,34 @@ async function deleteMessagesByCurrentSessionRemote() {
     method: 'DELETE',
     headers: {
       ...supabaseHeaders(),
-      Prefer: 'return=minimal'
+      Prefer: 'return=representation'
     }
   });
   if (!response.ok) {
-    throw new Error(await response.text());
+    const raw = await response.text();
+    throw new Error(`HTTP ${response.status} ${response.statusText}: ${raw}`);
   }
+  const raw = await response.text();
+  if (!raw) {
+    return 0;
+  }
+  try {
+    const rows = JSON.parse(raw);
+    return Array.isArray(rows) ? rows.length : 0;
+  } catch (_error) {
+    return 0;
+  }
+}
+
+function formatSupabaseError(error) {
+  if (!error) {
+    return 'error desconocido.';
+  }
+  const text = String(error.message || error);
+  if (text.length > 220) {
+    return `${text.slice(0, 220)}...`;
+  }
+  return text;
 }
 
 async function clearCurrentRoomLocalState() {
@@ -3149,9 +3175,16 @@ function buildSetupRequirements() {
     '',
     '3. Políticas mínimas para cliente anónimo',
     '',
-    'Necesitas permitir select, insert y update sobre public.messages.',
-    'Necesitas permitir insert y select sobre storage.objects del bucket chat-files.',
+    'Necesitas permitir select, insert, update y delete sobre public.messages.',
+    'Necesitas permitir insert, select y delete sobre storage.objects del bucket chat-files.',
     'Si quieres restringir por sala, usa session_id y sender en tus políticas RLS.',
+    '',
+    'Ejemplo rápido para que el botón "Reiniciar sala (todos)" funcione:',
+    '',
+    'create policy if not exists "messages delete anon" on public.messages for delete to anon using (true);',
+    'create policy if not exists "storage delete anon" on storage.objects for delete to anon using (bucket_id = \'chat-files\');',
+    '',
+    'Nota: el ejemplo anterior abre borrado total para el rol anon; úsalo solo en entornos de confianza.',
     '',
     '4. Edge Function exportHistory',
     '',
