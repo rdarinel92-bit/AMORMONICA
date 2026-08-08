@@ -18,7 +18,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v38';
+const APP_VERSION = '2026-08-08-v39';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -2718,44 +2718,40 @@ async function cancelOrRemoveOwnMedia(message) {
   let deleteSuccess = false;
   if (state.online && isConfigured()) {
     try {
-      // Use soft delete: mark deleted_at instead of fully removing
-      await updateMessageRemoteByRef(message, {
-        deleted_at: new Date().toISOString(),
-        content: '',
-        chunks_total: 0,
-        chunks_sent: 0
-      });
+      // Hard delete the media message so it disappears from chat for both users.
+      await deleteMessageRemoteByRef(message);
       deleteSuccess = true;
     } catch (error) {
-      await updateMessageRemoteByRef(message, {
-        status: 'error',
-        content: '',
-        chunks_total: 0,
-        chunks_sent: 0
-      }).catch(() => {
-      });
-      setComposerHint(message.type === 'audio'
-        ? 'No se pudo eliminar el audio. Reintentar...'
-        : 'No se pudo eliminar la imagen. Reintentar...');
-      return;
+      try {
+        // Fallback for environments where direct delete is blocked or fails.
+        await updateMessageRemoteByRef(message, {
+          deleted_at: new Date().toISOString(),
+          content: '',
+          chunks_total: 0,
+          chunks_sent: 0
+        });
+        deleteSuccess = true;
+      } catch (_fallbackError) {
+        await updateMessageRemoteByRef(message, {
+          status: 'error',
+          content: '',
+          chunks_total: 0,
+          chunks_sent: 0
+        }).catch(() => {
+        });
+        setComposerHint(message.type === 'audio'
+          ? 'No se pudo eliminar el audio. Reintentar...'
+          : 'No se pudo eliminar la imagen. Reintentar...');
+        return;
+      }
     }
   } else {
     deleteSuccess = true;
   }
 
   if (deleteSuccess) {
-    if (isPending) {
-      removeLocalMessage(messageRef);
-    } else {
-      upsertMessage({
-        ...message,
-        deleted_at: new Date().toISOString(),
-        content: '',
-        status: 'sent',
-        chunks_total: 0,
-        chunks_sent: 0
-      });
-    }
+    // Remove immediately from local UI to respect the delete action.
+    removeLocalMessage(messageRef);
     updateQueueSize();
     if (message.type === 'audio') {
       setComposerHint(isPending ? 'Envio de audio cancelado.' : 'Audio eliminado del chat.');
