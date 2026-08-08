@@ -18,7 +18,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v37';
+const APP_VERSION = '2026-08-08-v38';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -33,6 +33,9 @@ const IMAGE_UPLOAD_RETRY_MAX_MS = 60000;
 const IMAGE_DRAFT_PREVIEW_ENABLED = false;
 const VOICE_MAX_SECONDS = 120;
 const VOICE_MIN_BYTES = 400;
+const VOICE_BITRATE_KBPS_LOW = 16;
+const VOICE_BITRATE_KBPS_MEDIUM = 24;
+const VOICE_BITRATE_KBPS_HIGH = 32;
 const RESET_FUNCTION_TIMEOUT_MS = 25000;
 const HISTORY_PAGE_SIZE = 80;
 const IDENTITY_ENTRY_STEPS = [
@@ -1480,6 +1483,25 @@ function chooseVoiceMimeType() {
   return '';
 }
 
+function chooseVoiceBitrateKbps() {
+  const kbps = Number(state.kbps || 0);
+  if (!state.online || kbps <= 0) {
+    return VOICE_BITRATE_KBPS_MEDIUM;
+  }
+  if (kbps < 160) {
+    return VOICE_BITRATE_KBPS_LOW;
+  }
+  if (kbps < 700) {
+    return VOICE_BITRATE_KBPS_MEDIUM;
+  }
+  return VOICE_BITRATE_KBPS_HIGH;
+}
+
+function formatSecondsLabel(totalSeconds) {
+  const value = Math.max(0, Math.round(Number(totalSeconds || 0)));
+  return `${value}s`;
+}
+
 function updateVoiceRecordButton() {
   if (!elements.voiceRecord) {
     return;
@@ -1536,7 +1558,19 @@ async function startVoiceRecording() {
       }
     });
     const mimeType = chooseVoiceMimeType();
-    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    const bitrateKbps = chooseVoiceBitrateKbps();
+    const recorderOptions = {
+      audioBitsPerSecond: bitrateKbps * 1000
+    };
+    if (mimeType) {
+      recorderOptions.mimeType = mimeType;
+    }
+    let recorder;
+    try {
+      recorder = new MediaRecorder(stream, recorderOptions);
+    } catch (_error) {
+      recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    }
 
     state.voiceStream = stream;
     state.voiceRecorder = recorder;
@@ -1570,7 +1604,8 @@ async function startVoiceRecording() {
         await enqueueAudioMessage(blob, {
           durationMs,
           contentType,
-          fileName: `nota-${Date.now()}.webm`
+          fileName: `nota-${Date.now()}.webm`,
+          audioBitrateKbps: bitrateKbps
         });
       } catch (error) {
         console.error(error);
@@ -1584,7 +1619,8 @@ async function startVoiceRecording() {
       setComposerHint('Error de grabación de audio.');
     });
 
-    recorder.start(700);
+    // Record as a single block to preserve correct duration metadata.
+    recorder.start();
     state.voiceStopTimer = window.setTimeout(() => {
       stopVoiceRecording().catch((error) => {
         console.error(error);
@@ -2165,6 +2201,13 @@ function buildStatusLabel(message) {
     return message.status === 'read' ? 'visto' : 'recibido';
   }
   if ((message.type === 'image' || message.type === 'audio') && message.status === 'pending') {
+    if (message.type === 'audio' && Number(message.duration_ms || 0) > 0) {
+      const sent = Number(message.chunks_sent || 0);
+      const total = Math.max(1, Number(message.chunks_total || 1));
+      const uploadedSeconds = (sent / total) * (Number(message.duration_ms) / 1000);
+      const totalSeconds = Number(message.duration_ms) / 1000;
+      return `enviando audio ${formatSecondsLabel(uploadedSeconds)}/${formatSecondsLabel(totalSeconds)}`;
+    }
     return `pendiente ${message.chunks_sent || 0}/${message.chunks_total || 0}`;
   }
   if (message.status === 'delivered') {
@@ -2256,7 +2299,11 @@ async function renderImageMessage(message, container, loadingNode, selected = fa
 
       const progressText = document.createElement('small');
       progressText.className = 'upload-progress-text';
-      progressText.textContent = `Subiendo ${sent}/${total} (${percent}%)`;
+      const totalSeconds = Number(message.duration_ms || 0) / 1000;
+      const uploadedSeconds = totalSeconds > 0 ? (sent / total) * totalSeconds : 0;
+      progressText.textContent = totalSeconds > 0
+        ? `Enviando ${formatSecondsLabel(uploadedSeconds)} de ${formatSecondsLabel(totalSeconds)} (${percent}%)`
+        : `Subiendo ${sent}/${total} (${percent}%)`;
       frame.appendChild(progressText);
     }
 
@@ -2968,6 +3015,7 @@ async function enqueueAudioMessage(blob, metadata = {}) {
   const durationMs = Math.max(1, Number(metadata.durationMs || 0));
   const contentType = metadata.contentType || blob.type || 'audio/webm';
   const fileName = metadata.fileName || `nota-${Date.now()}.webm`;
+  const audioBitrateKbps = Math.max(1, Number(metadata.audioBitrateKbps || 0));
 
   const message = {
     local_id: localId,
@@ -2998,7 +3046,8 @@ async function enqueueAudioMessage(blob, metadata = {}) {
     remoteInserted: false,
     previewUrl,
     resumed: false,
-    durationMs
+    durationMs,
+    audioBitrateKbps
   };
 
   state.canceledUploadIds.delete(localId);
@@ -3009,7 +3058,11 @@ async function enqueueAudioMessage(blob, metadata = {}) {
     console.error(error);
     scheduleUploadRetry(uploadJob, error).catch((nestedError) => console.error(nestedError));
   });
-  setComposerHint('Nota de voz en cola.');
+  if (audioBitrateKbps > 0) {
+    setComposerHint(`Nota de voz en cola (${audioBitrateKbps} kbps).`);
+  } else {
+    setComposerHint('Nota de voz en cola.');
+  }
   return localId;
 }
 
