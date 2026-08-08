@@ -1173,13 +1173,19 @@ async function showImageDrafPanel(file) {
     const compressed = await compressImage(file, targetKb, getMaxDimensionForMode());
     const previewUrl = URL.createObjectURL(compressed);
 
+    setComposerHint('Preparando chunks de imagen...');
+    const localId = createId('img');
+    const chunks = await buildChunkManifest(compressed, localId);
+
     state.imageDraftFile = file;
     state.imageDraft = {
       compressed,
       previewUrl,
       targetKb,
       fileName: file.name,
-      originalSize: file.size
+      originalSize: file.size,
+      localId,
+      chunks
     };
 
     const canvas = await getCanvasFromImageFile(compressed);
@@ -1192,7 +1198,7 @@ async function showImageDrafPanel(file) {
     elements.draftEstimate.textContent = estimatedSeconds > 0 ? `~${estimatedSeconds}s` : 'Bajo demanda';
 
     elements.imageDraftPanel.hidden = false;
-    setComposerHint('Listo para enviar. Revisa la imagen comprimida.');
+    setComposerHint('Listo para enviar. Toca "Enviar imagen" para comenzar el upload.');
   } catch (error) {
     console.error(error);
     setComposerHint('Error al procesar imagen. Intenta otra.');
@@ -1246,12 +1252,28 @@ async function enqueueImageMessage(file) {
     setComposerHint('Red muy lenta: la imagen quedó bloqueada. Activa Forzar imagen si la necesitas.');
     return;
   }
-  const targetKb = getTargetImageKb();
-  setComposerHint(`Comprimiendo imagen a menos de ${targetKb} KB...`);
-  const compressed = await compressImage(file, targetKb, getMaxDimensionForMode());
-  const localId = createId('img');
-  const previewUrl = URL.createObjectURL(compressed);
-  const chunks = await buildChunkManifest(compressed, localId);
+
+  let compressed;
+  let chunks;
+  let localId;
+  let previewUrl;
+
+  if (state.imageDraft && state.imageDraft.chunks) {
+    compressed = state.imageDraft.compressed;
+    chunks = state.imageDraft.chunks;
+    localId = state.imageDraft.localId;
+    previewUrl = state.imageDraft.previewUrl;
+    setComposerHint('Iniciando upload de imagen...');
+  } else {
+    const targetKb = getTargetImageKb();
+    setComposerHint(`Comprimiendo imagen a menos de ${targetKb} KB...`);
+    compressed = await compressImage(file, targetKb, getMaxDimensionForMode());
+    localId = createId('img');
+    previewUrl = URL.createObjectURL(compressed);
+    setComposerHint('Preparando chunks de imagen...');
+    chunks = await buildChunkManifest(compressed, localId);
+  }
+
   const message = {
     local_id: localId,
     sender: state.config.senderId,
