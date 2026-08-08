@@ -261,6 +261,7 @@ function bindUi() {
 
   elements.toggleSetup.addEventListener('click', () => {
     elements.setupPanel.hidden = !elements.setupPanel.hidden;
+    elements.setupPanel.setAttribute('aria-hidden', elements.setupPanel.hidden ? 'true' : 'false');
   });
 
   elements.toggleConfigLock.addEventListener('click', () => {
