@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v30';
+const APP_VERSION = '2026-08-08-v31';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -1988,6 +1988,14 @@ function buildStatusLabel(message) {
 
 async function renderImageMessage(message, container, loadingNode, selected = false) {
   try {
+    // Check if message was soft-deleted
+    if (message.deleted_at) {
+      loadingNode.textContent = 'Imagen eliminada por el remitente';
+      loadingNode.style.fontStyle = 'italic';
+      loadingNode.style.color = 'var(--muted)';
+      return;
+    }
+
     let src = message.previewUrl || '';
     if (!src && message.content) {
       src = await resolveImageSource(message.content);
@@ -2066,6 +2074,14 @@ async function renderImageMessage(message, container, loadingNode, selected = fa
 
 async function renderAudioMessage(message, container, loadingNode, selected = false) {
   try {
+    // Check if message was soft-deleted
+    if (message.deleted_at) {
+      loadingNode.textContent = 'Audio eliminado por el remitente';
+      loadingNode.style.fontStyle = 'italic';
+      loadingNode.style.color = 'var(--muted)';
+      return;
+    }
+
     let src = message.previewUrl || '';
     if (!src && message.content) {
       src = await resolveAudioSource(message.content);
@@ -2444,7 +2460,13 @@ async function cancelOrRemoveOwnMedia(message) {
   let deleteSuccess = false;
   if (state.online && isConfigured()) {
     try {
-      await deleteMessageRemote(message.local_id);
+      // Use soft delete: mark deleted_at instead of fully removing
+      await updateMessageRemote(message.local_id, {
+        deleted_at: new Date().toISOString(),
+        content: '',
+        chunks_total: 0,
+        chunks_sent: 0
+      });
       deleteSuccess = true;
     } catch (error) {
       await updateMessageRemote(message.local_id, {
