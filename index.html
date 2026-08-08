@@ -12,7 +12,7 @@
   <title>Chat Privado Ligero</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
   <main class="app">
@@ -68,6 +68,22 @@
             <input id="profile-settings-haptics" type="checkbox">
             <span>Vibración para este perfil</span>
           </label>
+          <label>
+            Alertas de mensajes
+            <select id="profile-settings-notification-mode">
+              <option value="both">Vibración + Timbre</option>
+              <option value="vibrate">Solo vibración</option>
+              <option value="sound">Solo timbre</option>
+            </select>
+          </label>
+          <label class="toggle-chip profile-settings-toggle">
+            <input id="profile-settings-system-notifications" type="checkbox">
+            <span>Notificaciones del sistema (banner)</span>
+          </label>
+          <div class="setup-actions">
+            <button id="profile-settings-allow-notifications" class="button ghost" type="button">Permitir notificaciones</button>
+          </div>
+          <p id="profile-settings-notification-status" class="setup-note">Estado de notificaciones: sin permiso.</p>
           <div class="setup-actions">
             <button id="profile-settings-save" class="button" type="submit">Guardar perfil</button>
           </div>
@@ -78,7 +94,10 @@
     <section id="identity-gate" class="identity-gate" hidden>
       <div class="identity-card">
         <h2>¿Quién eres?</h2>
-        <p class="setup-note">Elige tu usuario antes de entrar al chat.</p>
+        <p class="setup-note">Elige tu usuario antes de entrar al chat. Funciona bien en teléfonos modestos y se adapta según el soporte del navegador.</p>
+        <div class="setup-actions identity-install-actions">
+          <button id="identity-install-app" class="button ghost" type="button">Instalar en este teléfono</button>
+        </div>
         <div class="identity-actions">
           <button id="identity-roberto" class="identity-profile" type="button" aria-label="Entrar como Roberto">
             <span class="identity-profile-avatar">
@@ -223,6 +242,15 @@
 
     <section id="chat-log" class="chat-log" aria-live="polite" aria-label="Mensajes"></section>
 
+    <section id="message-quick-menu" class="message-quick-menu" hidden aria-hidden="true" aria-label="Acciones del mensaje seleccionado">
+      <button id="message-quick-copy" class="button ghost" type="button">Copiar mensaje</button>
+      <button id="message-quick-copy-location" class="button ghost" type="button" hidden>Copiar ubicación</button>
+      <button id="message-quick-copy-media" class="button ghost" type="button" hidden>Copiar enlace multimedia</button>
+      <button id="message-quick-edit" class="button ghost" type="button" hidden>Editar</button>
+      <button id="message-quick-delete" class="button ghost" type="button" hidden>Eliminar</button>
+      <button id="message-quick-close" class="button ghost" type="button">Cerrar</button>
+    </section>
+
     <section id="image-draft-panel" class="image-draft-panel" hidden aria-label="Preview de imagen">
       <div class="draft-preview">
         <img id="draft-image-preview" src="" alt="Preview de imagen">
@@ -275,6 +303,7 @@
         </section>
         <div class="composer-actions">
           <label class="button ghost file-button button-icon" for="image-input"><span class="icon">＋</span><span>Imagen</span></label>
+          <button id="open-camera" class="button ghost button-icon" type="button" aria-label="Tomar foto con cámara"><span class="icon">📷</span><span>Cámara</span></button>
           <button id="voice-record" class="button ghost button-icon voice-record" type="button" aria-pressed="false" aria-label="Grabar nota de voz"><span class="icon">●</span><span>Voz</span></button>
           <button id="send-location" class="button ghost button-icon" type="button" aria-label="Compartir ubicación aproximada"><span class="icon">⌖</span><span>Ubicación</span></button>
           <button id="emoji-toggle" class="button ghost button-icon" type="button" aria-expanded="false" aria-controls="emoji-panel"><span class="icon">☺</span><span>Emoji</span></button>
@@ -282,6 +311,7 @@
         </div>
       </form>
       <input id="image-input" type="file" accept="image/*" multiple hidden>
+      <input id="camera-input" type="file" accept="image/*" capture="environment" hidden>
       <p id="composer-hint" class="hint">Mantén pulsado Voz para grabar y suelta para enviar. Si no hay red, queda en cola y reintenta automáticamente.</p>
     </section>
   </main>
@@ -297,6 +327,6 @@
     </article>
   </template>
 
-  <script src="app.js?v=40"></script>
+  <script src="app.js?v=47"></script>
 </body>
 </html>

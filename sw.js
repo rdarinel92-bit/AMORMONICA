@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chat-lite-shell-v40';
+const CACHE_NAME = 'chat-lite-shell-v47';
 const APP_SHELL = [
   './index.html',
   './styles.css',
@@ -70,4 +70,46 @@ self.addEventListener('fetch', (event) => {
       return cached || caches.match('./index.html');
     }
   })());
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification && event.notification.data && event.notification.data.url) || './';
+  event.waitUntil((async () => {
+    const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of allClients) {
+      if ('focus' in client) {
+        await client.focus();
+        if ('navigate' in client) {
+          await client.navigate(targetUrl);
+        }
+        return;
+      }
+    }
+    if (self.clients.openWindow) {
+      await self.clients.openWindow(targetUrl);
+    }
+  })());
+});
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { body: event.data ? event.data.text() : '' };
+  }
+
+  const title = payload.title || 'Nuevo mensaje';
+  const options = {
+    body: payload.body || 'Tienes un mensaje nuevo.',
+    icon: payload.icon || 'icon.svg',
+    badge: payload.badge || 'icon.svg',
+    tag: payload.tag || 'chat-lite-message',
+    data: {
+      url: payload.url || './'
+    }
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
 });

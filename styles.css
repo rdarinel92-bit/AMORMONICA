@@ -683,6 +683,46 @@ textarea:focus {
   margin-bottom: 6px;
 }
 
+.message.mine .message-state[data-state='sent'],
+.message.mine .message-state[data-state='delivered'],
+.message.mine .message-state[data-state='read'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.message.mine .message-state[data-state='sent'],
+.message.mine .message-state[data-state='delivered'] {
+  color: color-mix(in srgb, var(--muted) 82%, white 18%);
+}
+
+.message.mine .message-state[data-state='read'] {
+  color: #69a8ff;
+}
+
+.message.mine .message-state[data-state='read']::before {
+  content: '✓✓';
+  letter-spacing: -0.08em;
+}
+
+.message.mine .message-state[data-state='delivered']::before {
+  content: '✓✓';
+  letter-spacing: -0.08em;
+}
+
+.message.mine .message-state[data-state='sent']::before {
+  content: '✓';
+}
+
+.message-state[data-state='error'] {
+  color: #ff9a9a;
+}
+
+.message-state[data-state='pending'] {
+  color: var(--muted);
+}
+
 .message-body {
   word-break: break-word;
 }
@@ -1072,6 +1112,33 @@ pre {
   min-height: 40px;
 }
 
+.message-quick-menu {
+  position: fixed;
+  left: 50%;
+  bottom: calc(102px + var(--vk-offset));
+  transform: translateX(-50%);
+  width: min(920px, calc(100vw - 20px));
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 92%, #0b1119 8%);
+  box-shadow: var(--shadow-md);
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  z-index: 35;
+  backdrop-filter: blur(8px);
+}
+
+.message-quick-menu[hidden] {
+  display: none !important;
+}
+
+.message-quick-menu .button {
+  flex: 1 1 132px;
+  min-height: 36px;
+}
+
 .typing-status-indicator[hidden] {
   display: none;
 }
@@ -1177,6 +1244,19 @@ pre {
 }
 
 @media (max-width: 640px) {
+  .message-quick-menu {
+    width: calc(100vw - 14px);
+    bottom: calc(96px + var(--vk-offset));
+    padding: 7px;
+    gap: 6px;
+  }
+
+  .message-quick-menu .button {
+    flex: 1 1 45%;
+    min-height: 34px;
+    font-size: 0.82rem;
+  }
+
   #image-draft-panel {
     left: 50%;
     right: auto;
@@ -1234,6 +1314,15 @@ pre {
 }
 
 @media (max-width: 420px) {
+  .message-quick-menu {
+    width: calc(100vw - 10px);
+    bottom: calc(94px + var(--vk-offset));
+  }
+
+  .message-quick-menu .button {
+    flex: 1 1 100%;
+  }
+
   #image-draft-panel {
     left: 50%;
     right: auto;

@@ -17,6 +17,22 @@ create index if not exists idx_user_profiles_sender
 create index if not exists idx_user_profiles_session_sender 
   on public.user_profiles(session_id, sender);
 
+create or replace function public.set_user_profiles_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_user_profiles_updated_at on public.user_profiles;
+create trigger trg_user_profiles_updated_at
+before update on public.user_profiles
+for each row
+execute function public.set_user_profiles_updated_at();
+
 -- Enable RLS
 alter table public.user_profiles enable row level security;
 

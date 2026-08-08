@@ -12,13 +12,17 @@ const STORAGE_KEYS = {
   dataSaver: 'chat-lite-data-saver',
   haptics: 'chat-lite-haptics',
   profileHaptics: 'chat-lite-profile-haptics',
+  notificationMode: 'chat-lite-notification-mode',
+  profileNotificationMode: 'chat-lite-profile-notification-mode',
+  profileSystemNotifications: 'chat-lite-profile-system-notifications',
+  installAudit: 'chat-lite-install-audit',
   e2eeUnlockUntil: 'chat-lite-e2ee-unlock-until',
   profilePhoto: 'chat-lite-profile-photo',
   identityEntryMessage: 'chat-lite-identity-entry-message',
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v40';
+const APP_VERSION = '2026-08-08-v47';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -109,6 +113,14 @@ const state = {
   forceImages: loadJson(STORAGE_KEYS.forceImages, true),
   dataSaver: false,
   haptics: loadJson(STORAGE_KEYS.haptics, false),
+  notificationMode: loadJson(STORAGE_KEYS.notificationMode, 'both'),
+  systemNotificationsEnabled: false,
+  installAudit: loadJson(STORAGE_KEYS.installAudit, {
+    promptAvailable: false,
+    lastChoice: '',
+    lastChoiceAt: '',
+    lastInstalledAt: ''
+  }),
   e2eeUnlockUntil: loadJson(STORAGE_KEYS.e2eeUnlockUntil, 0),
   selectedMessageKey: '',
   e2eeKeyPromise: null,
@@ -218,6 +230,8 @@ const elements = {
   messageForm: document.getElementById('message-form'),
   messageInput: document.getElementById('message-input'),
   imageInput: document.getElementById('image-input'),
+  cameraInput: document.getElementById('camera-input'),
+  openCamera: document.getElementById('open-camera'),
   sendLocation: document.getElementById('send-location'),
   connectionMode: document.getElementById('connection-mode'),
   connectionSpeed: document.getElementById('connection-speed'),
@@ -251,6 +265,14 @@ const elements = {
   profileSettingsName: document.getElementById('profile-settings-name'),
   profileSettingsEntryMessage: document.getElementById('profile-settings-entry-message'),
   profileSettingsHaptics: document.getElementById('profile-settings-haptics'),
+  profileSettingsNotificationMode: document.getElementById('profile-settings-notification-mode'),
+  profileSettingsSystemNotifications: document.getElementById('profile-settings-system-notifications'),
+  profileSettingsAllowNotifications: document.getElementById('profile-settings-allow-notifications'),
+  profileSettingsNotificationStatus: document.getElementById('profile-settings-notification-status'),
+  profileSettingsRefreshInstall: document.getElementById('profile-settings-refresh-install'),
+  profileSettingsInstallStatus: document.getElementById('profile-settings-install-status'),
+  identityInstallApp: document.getElementById('identity-install-app'),
+  identityInstallStatus: document.getElementById('identity-install-status'),
   profileAvatarImg: document.getElementById('profile-avatar-img'),
   profileAvatarFallback: document.getElementById('profile-avatar-fallback'),
   profileAvatarImgTopbar: document.getElementById('profile-avatar-img-topbar'),
@@ -263,7 +285,14 @@ const elements = {
   emojiPanelClose: document.getElementById('emoji-panel-close'),
   voiceRecord: document.getElementById('voice-record'),
   loadMoreHistory: document.getElementById('load-more-history'),
-  typingStatusIndicator: document.getElementById('typing-status-indicator')
+  typingStatusIndicator: document.getElementById('typing-status-indicator'),
+  messageQuickMenu: document.getElementById('message-quick-menu'),
+  messageQuickCopy: document.getElementById('message-quick-copy'),
+  messageQuickCopyLocation: document.getElementById('message-quick-copy-location'),
+  messageQuickCopyMedia: document.getElementById('message-quick-copy-media'),
+  messageQuickEdit: document.getElementById('message-quick-edit'),
+  messageQuickDelete: document.getElementById('message-quick-delete'),
+  messageQuickClose: document.getElementById('message-quick-close')
 };
 
 boot().catch((error) => {
@@ -672,25 +701,29 @@ function bindUi() {
   }
 
   if (elements.installApp) {
-    elements.installApp.addEventListener('click', async () => {
-      if (!deferredInstallPrompt) {
-        setComposerHint('La instalación aún no está disponible en este navegador.');
-        return;
-      }
-      deferredInstallPrompt.prompt();
-      const choice = await deferredInstallPrompt.userChoice;
-      deferredInstallPrompt = null;
-      elements.installApp.hidden = true;
-      elements.installApp.setAttribute('aria-hidden', 'true');
-      setComposerHint(choice.outcome === 'accepted'
-        ? 'Instalación iniciada.'
-        : 'Instalación cancelada.');
+    elements.installApp.addEventListener('click', () => {
+      requestAppInstall().catch((error) => {
+        console.error(error);
+        setComposerHint('No se pudo iniciar la instalación.');
+      });
+    });
+  }
+
+  if (elements.identityInstallApp) {
+    elements.identityInstallApp.addEventListener('click', () => {
+      requestAppInstall().catch((error) => {
+        console.error(error);
+        setComposerHint('No se pudo iniciar la instalación.');
+      });
     });
   }
 
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
     deferredInstallPrompt = event;
+    state.installAudit.promptAvailable = true;
+    persistInstallAudit();
+    updateInstallStatusUi();
     if (elements.installApp) {
       elements.installApp.hidden = false;
       elements.installApp.setAttribute('aria-hidden', 'false');
@@ -699,6 +732,10 @@ function bindUi() {
 
   window.addEventListener('appinstalled', () => {
     deferredInstallPrompt = null;
+    state.installAudit.lastInstalledAt = new Date().toISOString();
+    state.installAudit.promptAvailable = false;
+    persistInstallAudit();
+    updateInstallStatusUi();
     if (elements.installApp) {
       elements.installApp.hidden = true;
       elements.installApp.setAttribute('aria-hidden', 'true');
@@ -712,11 +749,17 @@ function bindUi() {
       });
     } else {
       clearUnreadBadge();
+      syncVisibleMessageReceipts().catch((error) => {
+        console.error(error);
+      });
     }
   });
 
   window.addEventListener('focus', () => {
     clearUnreadBadge();
+    syncVisibleMessageReceipts().catch((error) => {
+      console.error(error);
+    });
   });
 
   window.addEventListener('beforeunload', () => {
@@ -728,7 +771,7 @@ function bindUi() {
     if (!(target instanceof Element)) {
       return;
     }
-    if (!target.closest('.message')) {
+    if (!target.closest('.message') && !isMessageQuickMenuTarget(target)) {
       clearSelectedMessage();
     }
     if (state.profileMenuOpen && !isProfileMenuTarget(target)) {
@@ -746,6 +789,97 @@ function bindUi() {
     elements.netPanel.hidden = true;
     elements.netFab.setAttribute('aria-expanded', 'false');
   });
+
+  if (elements.messageQuickMenu) {
+    elements.messageQuickMenu.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+    });
+  }
+
+  if (elements.messageQuickClose) {
+    elements.messageQuickClose.addEventListener('click', () => {
+      clearSelectedMessage();
+    });
+  }
+
+  if (elements.messageQuickCopy) {
+    elements.messageQuickCopy.addEventListener('click', () => {
+      const selectedMessage = getSelectedMessage();
+      if (!selectedMessage) {
+        return;
+      }
+      if (selectedMessage.type === 'image' || selectedMessage.type === 'audio') {
+        const mediaRef = buildCopyableMediaReference(selectedMessage);
+        copyMessageText(mediaRef, 'Enlace copiado.').catch((error) => {
+          console.error(error);
+          setComposerHint('No se pudo copiar el enlace.');
+        });
+        return;
+      }
+      const textValue = String(selectedMessage.display_content || selectedMessage.content || '');
+      copyMessageText(textValue).catch((error) => {
+        console.error(error);
+        setComposerHint('No se pudo copiar el mensaje.');
+      });
+    });
+  }
+
+  if (elements.messageQuickCopyLocation) {
+    elements.messageQuickCopyLocation.addEventListener('click', () => {
+      const selectedMessage = getSelectedMessage();
+      if (!selectedMessage || selectedMessage.type === 'image' || selectedMessage.type === 'audio') {
+        return;
+      }
+      const textValue = String(selectedMessage.display_content || selectedMessage.content || '');
+      const locationText = extractLocationText(textValue);
+      copyMessageText(locationText, 'Ubicación copiada.').catch((error) => {
+        console.error(error);
+        setComposerHint('No se pudo copiar la ubicación.');
+      });
+    });
+  }
+
+  if (elements.messageQuickCopyMedia) {
+    elements.messageQuickCopyMedia.addEventListener('click', () => {
+      const selectedMessage = getSelectedMessage();
+      if (!selectedMessage) {
+        return;
+      }
+      const mediaRef = buildCopyableMediaReference(selectedMessage);
+      copyMessageText(mediaRef, 'Enlace multimedia copiado.').catch((error) => {
+        console.error(error);
+        setComposerHint('No se pudo copiar el enlace multimedia.');
+      });
+    });
+  }
+
+  if (elements.messageQuickEdit) {
+    elements.messageQuickEdit.addEventListener('click', () => {
+      const selectedMessage = getSelectedMessage();
+      if (!selectedMessage || !isOwnMessage(selectedMessage)) {
+        return;
+      }
+      editOwnTextMessage(selectedMessage).catch((error) => {
+        console.error(error);
+        setComposerHint('No se pudo editar el mensaje.');
+      });
+    });
+  }
+
+  if (elements.messageQuickDelete) {
+    elements.messageQuickDelete.addEventListener('click', () => {
+      const selectedMessage = getSelectedMessage();
+      if (!selectedMessage || !isOwnMessage(selectedMessage)) {
+        return;
+      }
+      const isMedia = selectedMessage.type === 'image' || selectedMessage.type === 'audio';
+      const action = isMedia ? cancelOrRemoveOwnMedia(selectedMessage) : deleteOwnTextMessage(selectedMessage);
+      action.catch((error) => {
+        console.error(error);
+        setComposerHint(isMedia ? 'No se pudo completar la acción sobre el archivo.' : 'No se pudo eliminar el mensaje.');
+      });
+    });
+  }
 
   elements.toggleSetup.addEventListener('click', () => {
     toggleAdvancedSetupPanel();
@@ -783,6 +917,22 @@ function bindUi() {
     elements.profileSettingsForm.addEventListener('submit', (event) => {
       event.preventDefault();
       saveProfileSettingsFromPanel();
+    });
+  }
+
+  if (elements.profileSettingsAllowNotifications) {
+    elements.profileSettingsAllowNotifications.addEventListener('click', () => {
+      requestSystemNotificationPermission().catch((error) => {
+        console.error(error);
+        setComposerHint('No se pudo solicitar permiso de notificaciones.');
+      });
+    });
+  }
+
+  if (elements.profileSettingsRefreshInstall) {
+    elements.profileSettingsRefreshInstall.addEventListener('click', () => {
+      updateInstallStatusUi();
+      setComposerHint('Estado de instalación actualizado.');
     });
   }
 
@@ -898,9 +1048,7 @@ function bindUi() {
     }
   });
 
-  elements.imageInput.addEventListener('change', async (event) => {
-    const files = Array.from(event.target.files || []);
-    event.target.value = '';
+  const queueImageFiles = async (files) => {
     if (files.length === 0) {
       return;
     }
@@ -918,7 +1066,25 @@ function bindUi() {
     }
 
     await showImageDraftPanel(files[0], files.slice(1));
+  };
+
+  elements.imageInput.addEventListener('change', async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    await queueImageFiles(files);
   });
+
+  if (elements.openCamera && elements.cameraInput) {
+    elements.openCamera.addEventListener('click', () => {
+      elements.cameraInput.click();
+    });
+
+    elements.cameraInput.addEventListener('change', async (event) => {
+      const files = Array.from(event.target.files || []);
+      event.target.value = '';
+      await queueImageFiles(files);
+    });
+  }
 
   elements.draftSendButton.addEventListener('click', async () => {
     if (!state.imageDraftFile && (!state.imageDraftQueue || state.imageDraftQueue.length === 0)) {
@@ -1170,6 +1336,12 @@ function ensureIdentitySelected() {
   return new Promise((resolve) => {
     const deviceId = ensureDeviceId();
 
+    const completeSelection = () => {
+      updateIdentityEntryLoadingStatus('Cargando historial...', 32);
+      finalizeIdentityEntry();
+      resolve();
+    };
+
     if (state.pendingUrlIdentity) {
       const chosen = state.pendingUrlIdentity;
       state.identity = chosen;
@@ -1188,10 +1360,7 @@ function ensureIdentitySelected() {
         .catch((error) => {
           console.error('Identity progress failed', error);
         })
-        .finally(() => {
-          updateIdentityEntryLoadingStatus('Cargando historial...', 32);
-          resolve();
-        });
+        .finally(completeSelection);
       updateActiveUserUi();
       return;
     }
@@ -1236,10 +1405,7 @@ function ensureIdentitySelected() {
         .catch((error) => {
           console.error('Identity progress failed', error);
         })
-        .finally(() => {
-          updateIdentityEntryLoadingStatus('Cargando historial...', 32);
-          resolve();
-        });
+        .finally(completeSelection);
     };
 
     elements.identityRoberto.onclick = () => choose('roberto');
@@ -1266,6 +1432,7 @@ function setIdentityGateVisible(visible) {
   if (visible) {
     resetIdentityEntryProgressUi();
     updateIdentityProfilesUi();
+    updateInstallStatusUi();
     window.requestAnimationFrame(() => {
       if (elements.identityMonica) {
         elements.identityMonica.focus();
@@ -1298,6 +1465,189 @@ function saveProfileHapticsPreference(value, identityValue = '') {
   saveJson(profileHapticsStorageKey(identityValue), Boolean(value));
 }
 
+function normalizeNotificationMode(value) {
+  const mode = String(value || '').trim().toLowerCase();
+  if (mode === 'vibrate' || mode === 'sound') {
+    return mode;
+  }
+  return 'both';
+}
+
+function profileNotificationModeStorageKey(identityValue = '') {
+  const identity = normalizeIdentity(identityValue || state.config.senderId || state.identity || '');
+  return `${STORAGE_KEYS.profileNotificationMode}:${identity || 'anon'}`;
+}
+
+function loadProfileNotificationModePreference(identityValue = '') {
+  const fallback = normalizeNotificationMode(loadJson(STORAGE_KEYS.notificationMode, 'both'));
+  return normalizeNotificationMode(loadJson(profileNotificationModeStorageKey(identityValue), fallback));
+}
+
+function saveProfileNotificationModePreference(value, identityValue = '') {
+  saveJson(profileNotificationModeStorageKey(identityValue), normalizeNotificationMode(value));
+}
+
+function profileSystemNotificationsStorageKey(identityValue = '') {
+  const identity = normalizeIdentity(identityValue || state.config.senderId || state.identity || '');
+  return `${STORAGE_KEYS.profileSystemNotifications}:${identity || 'anon'}`;
+}
+
+function loadProfileSystemNotificationsPreference(identityValue = '') {
+  return Boolean(loadJson(profileSystemNotificationsStorageKey(identityValue), false));
+}
+
+function saveProfileSystemNotificationsPreference(value, identityValue = '') {
+  saveJson(profileSystemNotificationsStorageKey(identityValue), Boolean(value));
+}
+
+function readNotificationPermissionState() {
+  if (!('Notification' in window)) {
+    return 'unsupported';
+  }
+  return String(Notification.permission || 'default');
+}
+
+function updateNotificationPermissionUi() {
+  if (!elements.profileSettingsNotificationStatus || !elements.profileSettingsAllowNotifications) {
+    return;
+  }
+
+  const permission = readNotificationPermissionState();
+  if (permission === 'granted') {
+    elements.profileSettingsNotificationStatus.textContent = 'Estado de notificaciones: permiso concedido.';
+    elements.profileSettingsAllowNotifications.textContent = 'Permiso activo';
+    elements.profileSettingsAllowNotifications.disabled = true;
+    return;
+  }
+
+  if (permission === 'denied') {
+    elements.profileSettingsNotificationStatus.textContent = 'Estado de notificaciones: bloqueadas por el navegador.';
+    elements.profileSettingsAllowNotifications.textContent = 'Permiso bloqueado';
+    elements.profileSettingsAllowNotifications.disabled = true;
+    return;
+  }
+
+  if (permission === 'unsupported') {
+    elements.profileSettingsNotificationStatus.textContent = 'Estado de notificaciones: no soportadas en este navegador.';
+    elements.profileSettingsAllowNotifications.textContent = 'No soportado';
+    elements.profileSettingsAllowNotifications.disabled = true;
+    return;
+  }
+
+  elements.profileSettingsNotificationStatus.textContent = 'Estado de notificaciones: falta conceder permiso.';
+  elements.profileSettingsAllowNotifications.textContent = 'Permitir notificaciones';
+  elements.profileSettingsAllowNotifications.disabled = false;
+}
+
+async function requestSystemNotificationPermission() {
+  if (!('Notification' in window)) {
+    setComposerHint('Este navegador no soporta notificaciones del sistema.');
+    updateNotificationPermissionUi();
+    return false;
+  }
+
+  const result = await Notification.requestPermission();
+  updateNotificationPermissionUi();
+  if (result === 'granted') {
+    setComposerHint('Permiso de notificaciones concedido.');
+    return true;
+  }
+
+  setComposerHint('Permiso de notificaciones no concedido.');
+  return false;
+}
+
+function persistInstallAudit() {
+  saveJson(STORAGE_KEYS.installAudit, state.installAudit || {});
+}
+
+function isRunningStandalone() {
+  const byMedia = typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches;
+  const byNavigator = typeof navigator.standalone !== 'undefined' && Boolean(navigator.standalone);
+  return Boolean(byMedia || byNavigator);
+}
+
+function formatInstallAuditDate(value) {
+  if (!value) {
+    return 'nunca';
+  }
+  return formatDate(value);
+}
+
+function updateInstallStatusUi() {
+  const standalone = isRunningStandalone();
+  const promptReady = Boolean(deferredInstallPrompt || (state.installAudit && state.installAudit.promptAvailable));
+  const lastChoice = String((state.installAudit && state.installAudit.lastChoice) || 'sin intentos');
+  const lastChoiceAt = formatInstallAuditDate(state.installAudit && state.installAudit.lastChoiceAt);
+  const lastInstalledAt = formatInstallAuditDate(state.installAudit && state.installAudit.lastInstalledAt);
+  const installMessage = standalone
+    ? `Instalada y ejecutándose como app. Última instalación: ${lastInstalledAt}. Último intento: ${lastChoice} (${lastChoiceAt}).`
+    : `No está en modo app. Prompt disponible: ${promptReady ? 'sí' : 'no'}. Último intento: ${lastChoice} (${lastChoiceAt}).`;
+
+  if (elements.profileSettingsInstallStatus) {
+    elements.profileSettingsInstallStatus.textContent = `Estado instalación: ${installMessage}`;
+  }
+
+  if (elements.identityInstallStatus) {
+    elements.identityInstallStatus.textContent = standalone
+      ? `Ya está instalada en el teléfono. ${installMessage}`
+      : `Instalar crea un acceso directo y abre la app como PWA. ${installMessage}`;
+  }
+
+  const buttons = [elements.installApp, elements.identityInstallApp];
+  for (const button of buttons) {
+    if (!button) {
+      continue;
+    }
+    if (standalone) {
+      button.textContent = 'Instalada';
+      button.disabled = true;
+      button.setAttribute('aria-disabled', 'true');
+    } else if (promptReady) {
+      button.textContent = 'Instalar en este teléfono';
+      button.disabled = false;
+      button.removeAttribute('aria-disabled');
+    } else {
+      button.textContent = 'Instalar disponible al navegar';
+      button.disabled = false;
+      button.removeAttribute('aria-disabled');
+    }
+  }
+}
+
+async function requestAppInstall() {
+  if (isRunningStandalone()) {
+    setComposerHint('La app ya está instalada en este teléfono.');
+    updateInstallStatusUi();
+    return true;
+  }
+
+  if (!deferredInstallPrompt) {
+    setComposerHint('La instalación todavía no está lista en este navegador. Navega un poco y vuelve a intentarlo.');
+    state.installAudit.promptAvailable = false;
+    persistInstallAudit();
+    updateInstallStatusUi();
+    return false;
+  }
+
+  deferredInstallPrompt.prompt();
+  const choice = await deferredInstallPrompt.userChoice;
+  state.installAudit.lastChoice = String(choice && choice.outcome ? choice.outcome : 'unknown');
+  state.installAudit.lastChoiceAt = new Date().toISOString();
+  state.installAudit.promptAvailable = false;
+  persistInstallAudit();
+  updateInstallStatusUi();
+  deferredInstallPrompt = null;
+  if (elements.installApp) {
+    elements.installApp.hidden = false;
+    elements.installApp.setAttribute('aria-hidden', 'false');
+  }
+  setComposerHint(choice.outcome === 'accepted'
+    ? 'Instalación iniciada.'
+    : 'Instalación cancelada.');
+  return choice.outcome === 'accepted';
+}
+
 function openProfileSettingsPanel() {
   const identity = normalizeIdentity(state.config.senderId || state.identity || '');
   if (!identity) {
@@ -1313,6 +1663,14 @@ function openProfileSettingsPanel() {
   if (elements.profileSettingsHaptics) {
     elements.profileSettingsHaptics.checked = loadProfileHapticsPreference(identity);
   }
+  if (elements.profileSettingsNotificationMode) {
+    elements.profileSettingsNotificationMode.value = loadProfileNotificationModePreference(identity);
+  }
+  if (elements.profileSettingsSystemNotifications) {
+    elements.profileSettingsSystemNotifications.checked = loadProfileSystemNotificationsPreference(identity);
+  }
+  updateNotificationPermissionUi();
+  updateInstallStatusUi();
   if (elements.profileSettingsPanel) {
     elements.profileSettingsPanel.hidden = false;
     elements.profileSettingsPanel.setAttribute('aria-hidden', 'false');
@@ -1356,6 +1714,24 @@ function saveProfileSettingsFromPanel() {
     }
   }
 
+  if (elements.profileSettingsNotificationMode) {
+    const mode = normalizeNotificationMode(elements.profileSettingsNotificationMode.value);
+    saveProfileNotificationModePreference(mode, identity);
+    state.notificationMode = mode;
+    saveJson(STORAGE_KEYS.notificationMode, mode);
+  }
+
+  if (elements.profileSettingsSystemNotifications) {
+    const enabled = Boolean(elements.profileSettingsSystemNotifications.checked);
+    saveProfileSystemNotificationsPreference(enabled, identity);
+    state.systemNotificationsEnabled = enabled;
+    if (enabled && readNotificationPermissionState() !== 'granted') {
+      requestSystemNotificationPermission().catch((error) => {
+        console.error(error);
+      });
+    }
+  }
+
   closeProfileSettingsPanel();
   setComposerHint('Ajustes del perfil guardados.');
 }
@@ -1380,6 +1756,8 @@ function formatUserName(value) {
 function updateActiveUserUi() {
   elements.activeUser.textContent = formatUserName(state.config.senderId || state.identity);
   state.haptics = loadProfileHapticsPreference();
+  state.notificationMode = loadProfileNotificationModePreference();
+  state.systemNotificationsEnabled = loadProfileSystemNotificationsPreference();
   if (elements.haptics) {
     elements.haptics.checked = state.haptics;
   }
@@ -1394,12 +1772,14 @@ function updateActiveUserUi() {
   loadProfilePhoto();
   updateProfileFallbackInitial();
   updateSyncSummary();
+  updateInstallStatusUi();
 }
 
 function switchUserIdentity() {
   hideProfileMenu();
   const deviceId = ensureDeviceId();
   resetTransientChatState();
+  resetIdentityEntryProgressUi();
   state.identity = '';
   state.config.senderId = '';
   if (deviceId && state.identityByDevice[deviceId]) {
@@ -1438,7 +1818,7 @@ function syncProfileAvatarVisibility() {
 }
 
 function setComposerLocked(locked) {
-  const nodes = [elements.messageInput, elements.imageInput, elements.voiceRecord];
+  const nodes = [elements.messageInput, elements.imageInput, elements.cameraInput, elements.openCamera, elements.voiceRecord];
   for (const node of nodes) {
     if (!node) {
       continue;
@@ -2064,6 +2444,10 @@ function clearSelectedMessage() {
   scheduleRender();
 }
 
+function isMessageQuickMenuTarget(target) {
+  return Boolean(target && target.closest('#message-quick-menu'));
+}
+
 function getSelectedMessage() {
   return state.messages.find((item) => messageKey(item) === state.selectedMessageKey) || null;
 }
@@ -2107,7 +2491,9 @@ function renderMessages() {
     let longPressTriggered = false;
     sender.textContent = own ? 'Tu' : formatUserName(message.sender || 'desconocido');
     time.textContent = formatDate(message.timestamp || new Date().toISOString());
-    status.textContent = buildStatusLabel(message);
+    const statusInfo = buildMessageStatusInfo(message);
+    status.textContent = statusInfo.label;
+    status.dataset.state = statusInfo.state;
     root.classList.toggle('mine', own);
     root.classList.toggle('theirs', !own);
     root.classList.toggle('pending', message.status === 'pending');
@@ -2185,13 +2571,44 @@ function renderMessages() {
       body.appendChild(loading);
       renderAudioMessage(message, body, loading, selected);
     } else {
+      const textValue = String(message.display_content || message.content || '');
       const text = document.createElement('p');
-      text.textContent = message.display_content || message.content || '';
+      text.textContent = textValue;
       body.appendChild(text);
 
+      const actions = document.createElement('div');
+      actions.className = 'message-actions';
+
+      const copyButton = document.createElement('button');
+      copyButton.type = 'button';
+      copyButton.className = 'button ghost message-edit';
+      copyButton.textContent = 'Copiar mensaje';
+      copyButton.addEventListener('click', () => {
+        copyMessageText(textValue).catch((error) => {
+          console.error(error);
+          setComposerHint('No se pudo copiar el mensaje.');
+        });
+      });
+      copyButton.hidden = !selected;
+      actions.appendChild(copyButton);
+
+      const locationText = extractLocationText(textValue);
+      if (locationText) {
+        const copyLocationButton = document.createElement('button');
+        copyLocationButton.type = 'button';
+        copyLocationButton.className = 'button ghost message-edit';
+        copyLocationButton.textContent = 'Copiar ubicación';
+        copyLocationButton.addEventListener('click', () => {
+          copyMessageText(locationText, 'Ubicación copiada.').catch((error) => {
+            console.error(error);
+            setComposerHint('No se pudo copiar la ubicación.');
+          });
+        });
+        copyLocationButton.hidden = !selected;
+        actions.appendChild(copyLocationButton);
+      }
+
       if (own) {
-        const actions = document.createElement('div');
-        actions.className = 'message-actions';
         const editButton = document.createElement('button');
         editButton.type = 'button';
         editButton.className = 'button ghost message-edit';
@@ -2217,19 +2634,69 @@ function renderMessages() {
         });
         deleteButton.hidden = !selected;
         actions.appendChild(deleteButton);
-        actions.hidden = !selected;
-        body.appendChild(actions);
       }
+
+      actions.hidden = !selected;
+      body.appendChild(actions);
     }
 
     elements.chatLog.appendChild(fragment);
   }
+  renderSelectedMessageQuickMenu();
   elements.chatLog.scrollTop = elements.chatLog.scrollHeight;
 }
 
+function renderSelectedMessageQuickMenu() {
+  if (!elements.messageQuickMenu) {
+    return;
+  }
+  const message = getSelectedMessage();
+  if (!message) {
+    elements.messageQuickMenu.hidden = true;
+    elements.messageQuickMenu.setAttribute('aria-hidden', 'true');
+    return;
+  }
+
+  const isMedia = message.type === 'image' || message.type === 'audio';
+  const isOwn = isOwnMessage(message);
+  const textValue = String(message.display_content || message.content || '');
+  const locationText = isMedia ? '' : extractLocationText(textValue);
+  const mediaRef = isMedia ? buildCopyableMediaReference(message) : '';
+
+  if (elements.messageQuickCopy) {
+    elements.messageQuickCopy.hidden = isMedia ? !mediaRef : !textValue.trim();
+    elements.messageQuickCopy.textContent = isMedia ? 'Copiar enlace' : 'Copiar mensaje';
+  }
+  if (elements.messageQuickCopyLocation) {
+    elements.messageQuickCopyLocation.hidden = !locationText;
+  }
+  if (elements.messageQuickCopyMedia) {
+    elements.messageQuickCopyMedia.hidden = !mediaRef;
+  }
+  if (elements.messageQuickEdit) {
+    elements.messageQuickEdit.hidden = !(isOwn && !isMedia);
+  }
+  if (elements.messageQuickDelete) {
+    elements.messageQuickDelete.hidden = !isOwn;
+    elements.messageQuickDelete.textContent = isOwn && isMedia && message.status === 'pending'
+      ? 'Cancelar envío'
+      : 'Eliminar';
+  }
+
+  elements.messageQuickMenu.hidden = false;
+  elements.messageQuickMenu.setAttribute('aria-hidden', 'false');
+}
+
 function buildStatusLabel(message) {
+  return buildMessageStatusInfo(message).label;
+}
+
+function buildMessageStatusInfo(message) {
   if (!isOwnMessage(message)) {
-    return message.status === 'read' ? 'visto' : 'recibido';
+    return {
+      state: message.status === 'read' ? 'read' : 'received',
+      label: message.status === 'read' ? 'visto' : 'recibido'
+    };
   }
   if ((message.type === 'image' || message.type === 'audio') && message.status === 'pending') {
     if (message.type === 'audio' && Number(message.duration_ms || 0) > 0) {
@@ -2237,26 +2704,50 @@ function buildStatusLabel(message) {
       const total = Math.max(1, Number(message.chunks_total || 1));
       const uploadedSeconds = (sent / total) * (Number(message.duration_ms) / 1000);
       const totalSeconds = Number(message.duration_ms) / 1000;
-      return `enviando audio ${formatSecondsLabel(uploadedSeconds)}/${formatSecondsLabel(totalSeconds)}`;
+      return {
+        state: 'pending',
+        label: `enviando audio ${formatSecondsLabel(uploadedSeconds)}/${formatSecondsLabel(totalSeconds)}`
+      };
     }
-    return `pendiente ${message.chunks_sent || 0}/${message.chunks_total || 0}`;
+    return {
+      state: 'pending',
+      label: `pendiente ${message.chunks_sent || 0}/${message.chunks_total || 0}`
+    };
   }
   if (message.status === 'delivered') {
-    return 'entregado';
+    return {
+      state: 'delivered',
+      label: 'entregado'
+    };
   }
   if (message.status === 'read') {
-    return 'leído';
+    return {
+      state: 'read',
+      label: 'leído'
+    };
   }
   if (message.status === 'resumed') {
-    return 'enviado';
+    return {
+      state: 'sent',
+      label: 'enviado'
+    };
   }
   if (message.status === 'sent') {
-    return 'enviado';
+    return {
+      state: 'sent',
+      label: 'enviado'
+    };
   }
   if (message.status === 'error') {
-    return 'error';
+    return {
+      state: 'error',
+      label: 'error'
+    };
   }
-  return 'pendiente';
+  return {
+    state: 'pending',
+    label: 'pendiente'
+  };
 }
 
 async function renderImageMessage(message, container, loadingNode, selected = false) {
@@ -2464,6 +2955,82 @@ async function downloadImageAsset(message, src) {
   return downloadMediaAsset(message, src, 'imagen');
 }
 
+async function copyMessageText(rawText, successHint = 'Mensaje copiado.') {
+  const text = String(rawText || '').trim();
+  if (!text) {
+    setComposerHint('No hay contenido para copiar.');
+    return;
+  }
+
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    setComposerHint(successHint);
+    return;
+  }
+
+  const fallback = document.createElement('textarea');
+  fallback.value = text;
+  fallback.setAttribute('readonly', '');
+  fallback.style.position = 'fixed';
+  fallback.style.top = '-9999px';
+  fallback.style.opacity = '0';
+  document.body.appendChild(fallback);
+  fallback.select();
+  const copied = document.execCommand('copy');
+  fallback.remove();
+  if (!copied) {
+    throw new Error('No se pudo copiar usando fallback');
+  }
+  setComposerHint(successHint);
+}
+
+function extractLocationText(textValue) {
+  const text = String(textValue || '');
+  if (!text) {
+    return '';
+  }
+
+  const mapUrlMatch = text.match(/https?:\/\/\S+/i);
+  if (mapUrlMatch && /maps|mapa|google\.com\/maps/i.test(mapUrlMatch[0])) {
+    return mapUrlMatch[0];
+  }
+
+  const coordMatch = text.match(/(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/);
+  if (coordMatch) {
+    return `${coordMatch[1]}, ${coordMatch[2]}`;
+  }
+
+  return '';
+}
+
+function buildCopyableMediaReference(message) {
+  if (!message) {
+    return '';
+  }
+
+  const direct = String(message.previewUrl || message.content || '').trim();
+  if (/^https?:\/\//i.test(direct)) {
+    return direct;
+  }
+
+  if (!direct) {
+    return '';
+  }
+
+  const baseUrl = String(state.config.supabaseUrl || '').trim().replace(/\/$/, '');
+  const bucket = String(state.config.bucketName || defaultConfig.bucketName || '').trim();
+  if (!baseUrl || !bucket) {
+    return direct;
+  }
+
+  const encodedPath = direct
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+  return `${baseUrl}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encodedPath}`;
+}
+
 async function autoSaveReceivedImage(message, src) {
   const key = messageKey(message);
   if (!key || state.autoSavedImages.has(key)) {
@@ -2504,6 +3071,11 @@ async function resolveChunkedAsset(content, fallbackContentType, inlinePattern, 
     return content;
   }
   const manifest = await fetchJsonWithAuth(content);
+  const expectsEncryptedChunks = Boolean(manifest.e2ee);
+  let mediaE2EEKey = null;
+  if (expectsEncryptedChunks) {
+    mediaE2EEKey = await getE2EEKey();
+  }
   const buffers = [];
   for (let index = 0; index < manifest.chunks.length; index += 1) {
     const partUrl = publicStorageUrl(manifest.chunks[index].path);
@@ -2511,11 +3083,32 @@ async function resolveChunkedAsset(content, fallbackContentType, inlinePattern, 
     if (!response.ok) {
       throw new Error(chunkErrorText);
     }
-    const arrayBuffer = await response.arrayBuffer();
+    let arrayBuffer = await response.arrayBuffer();
     const actualHash = await sha256Hex(arrayBuffer);
     if (actualHash !== manifest.chunks[index].sha256) {
       throw new Error('Integridad de bloque inválida');
     }
+
+    const chunkMeta = manifest.chunks[index] || {};
+    const encryptedChunk = Boolean(expectsEncryptedChunks || chunkMeta.encrypted || chunkMeta.iv);
+    if (encryptedChunk) {
+      const ivBase64 = String(chunkMeta.iv || '');
+      if (!ivBase64) {
+        throw new Error('Bloque cifrado sin IV');
+      }
+      const key = mediaE2EEKey || await getE2EEKey();
+      try {
+        const plainBuffer = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: fromBase64ToBytes(ivBase64) },
+          key,
+          arrayBuffer
+        );
+        arrayBuffer = plainBuffer;
+      } catch {
+        throw new Error('No se pudo descifrar el archivo multimedia.');
+      }
+    }
+
     buffers.push(arrayBuffer);
   }
   const merged = mergeArrayBuffers(buffers);
@@ -3112,15 +3705,39 @@ async function insertPendingMediaMessage(message, uploadJob) {
 
 async function buildChunkManifest(blob, localId) {
   const chunks = [];
+  const shouldEncrypt = isE2EEEnabled();
+  let e2eeKey = null;
+  if (shouldEncrypt) {
+    if (!await ensureE2EEUnlocked(true)) {
+      throw new Error('Debes desbloquear E2E para enviar multimedia cifrada.');
+    }
+    e2eeKey = await getE2EEKey();
+  }
+
   for (let offset = 0, index = 0; offset < blob.size; offset += CHUNK_SIZE, index += 1) {
     const part = blob.slice(offset, offset + CHUNK_SIZE, blob.type);
-    const buffer = await part.arrayBuffer();
-    const sha256 = await sha256Hex(buffer);
+    const plainBuffer = await part.arrayBuffer();
+    let payloadBuffer = plainBuffer;
+    let payloadBlob = part;
+    let ivBase64 = '';
+
+    if (e2eeKey) {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const cipherBuffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, e2eeKey, plainBuffer);
+      payloadBuffer = cipherBuffer;
+      payloadBlob = new Blob([payloadBuffer], { type: 'application/octet-stream' });
+      ivBase64 = toBase64(iv);
+    }
+
+    const sha256 = await sha256Hex(payloadBuffer);
     chunks.push({
       index,
-      blob: part,
-      size: part.size,
+      blob: payloadBlob,
+      size: payloadBlob.size,
+      plain_size: part.size,
       sha256,
+      encrypted: Boolean(e2eeKey),
+      iv: ivBase64,
       path: `chunks/${state.config.sessionId}/${localId}/${String(index).padStart(6, '0')}.part`
     });
   }
@@ -3168,6 +3785,7 @@ async function processUploadJob(job) {
   const manifest = {
     version: 1,
     type: `chunked-${mediaType}`,
+    e2ee: liveJob.chunks.some((chunk) => chunk.encrypted),
     sessionId: liveJob.sessionId,
     sender: liveJob.sender,
     localId: liveJob.id,
@@ -3179,7 +3797,10 @@ async function processUploadJob(job) {
       index: chunk.index,
       path: chunk.path,
       size: chunk.size,
-      sha256: chunk.sha256
+      plain_size: Number(chunk.plain_size || 0),
+      sha256: chunk.sha256,
+      encrypted: Boolean(chunk.encrypted),
+      iv: chunk.iv || ''
     }))
   };
 
@@ -3923,11 +4544,17 @@ function notifyIncomingMessage(message) {
   state.unreadCount += 1;
   updateTitleBadge();
 
-  if (state.haptics && navigator.vibrate) {
+  const mode = normalizeNotificationMode(state.notificationMode);
+  const useVibration = mode === 'both' || mode === 'vibrate';
+  const useSound = mode === 'both' || mode === 'sound';
+
+  if (useVibration && navigator.vibrate) {
     navigator.vibrate(message.type === 'audio' ? [12, 60, 12] : [18]);
   }
 
-  playNotificationTone(message.type);
+  if (useSound) {
+    playNotificationTone(message.type);
+  }
 
   const label = message.type === 'audio'
     ? `🎤 Nota de voz de ${formatUserName(message.sender || '')}`
@@ -3935,7 +4562,50 @@ function notifyIncomingMessage(message) {
       ? `📷 Imagen de ${formatUserName(message.sender || '')}`
       : `💬 ${formatUserName(message.sender || '')}: ${String(message.display_content || message.content || '').slice(0, 60)}`;
 
+  notifySystemMessage(message, label);
   setComposerHint(label);
+}
+
+async function notifySystemMessage(message, label) {
+  if (!state.systemNotificationsEnabled || !document.hidden) {
+    return;
+  }
+  if (!('Notification' in window) || readNotificationPermissionState() !== 'granted') {
+    return;
+  }
+
+  const title = `Chat: ${formatUserName(message.sender || '')}`;
+  const body = label;
+  const targetUrl = getShareUrl();
+  const options = {
+    body,
+    icon: 'icon.svg',
+    badge: 'icon.svg',
+    tag: `chat-${state.config.sessionId || 'sala'}`,
+    renotify: false,
+    data: {
+      url: targetUrl
+    }
+  };
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (registration && registration.showNotification) {
+        await registration.showNotification(title, options);
+        return;
+      }
+    }
+
+    const fallback = new Notification(title, options);
+    fallback.onclick = () => {
+      window.focus();
+      window.location.href = targetUrl;
+      fallback.close();
+    };
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function updateTitleBadge() {
@@ -4000,6 +4670,19 @@ function syncMessageReceipt(message) {
   updateMessageRemote(message.local_id, { status: targetStatus }).catch((error) => {
     console.error(error);
   });
+}
+
+async function syncVisibleMessageReceipts() {
+  if (document.hidden || !state.online || !isConfigured()) {
+    return;
+  }
+
+  const pendingMessages = state.messages.filter((message) => !isOwnMessage(message) && message.local_id && statusRank(message.status) < statusRank('read'));
+  if (pendingMessages.length === 0) {
+    return;
+  }
+
+  await Promise.allSettled(pendingMessages.map((message) => updateMessageRemote(message.local_id, { status: 'read' })));
 }
 
 async function uploadFileToStorage(path, blob) {
@@ -5005,7 +5688,7 @@ async function loadProfilePhotoFromSupabase(sender) {
   }
   try {
     const filter = encodeURIComponent(`sender=eq.${sender}`);
-    const url = `${state.config.supabaseUrl}/rest/v1/user_profiles?${filter}`;
+    const url = `${state.config.supabaseUrl}/rest/v1/user_profiles?select=avatar_data,avatar_mime,updated_at&${filter}&limit=1`;
     
     const response = await fetch(url, {
       headers: supabaseHeaders()
@@ -5039,6 +5722,30 @@ async function loadProfilePhotoFromSupabase(sender) {
   }
 }
 
+async function deleteProfilePhotoFromSupabase() {
+  if (!isConfigured()) {
+    return;
+  }
+  try {
+    const sender = state.config.senderId;
+    if (!sender) {
+      return;
+    }
+
+    const filter = encodeURIComponent(`sender=eq.${sender}`);
+    const response = await fetch(`${state.config.supabaseUrl}/rest/v1/user_profiles?${filter}`, {
+      method: 'DELETE',
+      headers: supabaseHeaders()
+    });
+
+    if (!response.ok) {
+      console.warn('Failed to delete profile photo from Supabase:', response.statusText);
+    }
+  } catch (error) {
+    console.error('Error deleting profile photo from Supabase:', error);
+  }
+}
+
 function clearProfilePhoto() {
   localStorage.removeItem(profilePhotoStorageKey());
   localStorage.removeItem(STORAGE_KEYS.profilePhoto);
@@ -5050,6 +5757,9 @@ function clearProfilePhoto() {
   }
   syncProfileAvatarVisibility();
   updateIdentityProfilesUi();
+  deleteProfilePhotoFromSupabase().catch((error) => {
+    console.error('Failed to delete profile photo from Supabase:', error);
+  });
   setComposerHint('Imagen de perfil eliminada.');
 }
 
