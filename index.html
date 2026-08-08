@@ -12,10 +12,26 @@
     <header class="topbar">
       <div>
         <h1>Chat Privado Ligero</h1>
-        <p class="subtitle">Una sola pagina, optimizada para conexiones lentas</p>
+        <p class="subtitle">Una sola pagina, optimizada para conexiones lentas. Usuario: <strong id="active-user">sin elegir</strong></p>
       </div>
       <button id="toggle-setup" type="button" class="button ghost" hidden aria-hidden="true">Config</button>
     </header>
+
+    <section id="identity-gate" class="identity-gate" hidden>
+      <div class="identity-card">
+        <h2>Quien eres?</h2>
+        <p class="setup-note">Elige tu usuario antes de entrar al chat.</p>
+        <div class="identity-actions">
+          <button id="identity-roberto" class="button" type="button">Soy Roberto</button>
+          <button id="identity-monica" class="button ghost" type="button">Soy Monica</button>
+        </div>
+        <label>
+          Otro nombre
+          <input id="identity-custom" type="text" placeholder="Escribe tu nombre" autocomplete="off" maxlength="40">
+        </label>
+        <button id="identity-custom-submit" class="button ghost" type="button">Entrar con ese nombre</button>
+      </div>
+    </section>
 
     <section class="status-grid" aria-label="Estado de conexion">
       <div class="status-card">

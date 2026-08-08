@@ -3,7 +3,8 @@ const STORAGE_KEYS = {
   queuedTexts: 'chat-lite-queued-texts',
   localMessages: 'chat-lite-local-messages',
   knownRemoteIds: 'chat-lite-known-remote-ids',
-  configLocked: 'chat-lite-config-locked'
+  configLocked: 'chat-lite-config-locked',
+  identity: 'chat-lite-identity'
 };
 
 const DB_NAME = 'chat-lite-db';
@@ -31,7 +32,7 @@ const defaultConfig = {
   supabaseUrl: 'https://kxhgjamftlniaspagfjo.supabase.co',
   supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4aGdqYW1mdGxuaWFzcGFnZmpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNDYxOTQsImV4cCI6MjEwMTcyMjE5NH0.MnQQrNAGRP3nf_-L63O9iX4__055USW6gUq6lZUEMsk',
   sessionId: 'sala-principal',
-  senderId: createId('user'),
+  senderId: '',
   bucketName: 'chat-files',
   exportEndpoint: 'exportHistory',
   exportEmail: '',
@@ -41,6 +42,7 @@ const defaultConfig = {
 const state = {
   config: { ...defaultConfig, ...loadJson(STORAGE_KEYS.config, {}) },
   configLocked: loadJson(STORAGE_KEYS.configLocked, true),
+  identity: loadJson(STORAGE_KEYS.identity, ''),
   mode: 'Sin configurar',
   kbps: 0,
   latency: 0,
@@ -62,6 +64,12 @@ const state = {
 };
 
 const elements = {
+  activeUser: document.getElementById('active-user'),
+  identityGate: document.getElementById('identity-gate'),
+  identityRoberto: document.getElementById('identity-roberto'),
+  identityMonica: document.getElementById('identity-monica'),
+  identityCustom: document.getElementById('identity-custom'),
+  identityCustomSubmit: document.getElementById('identity-custom-submit'),
   toggleSetup: document.getElementById('toggle-setup'),
   setupPanel: document.getElementById('setup-panel'),
   configForm: document.getElementById('config-form'),
@@ -101,6 +109,8 @@ boot().catch((error) => {
 async function boot() {
   bindUi();
   applyConfigToForm();
+  setComposerLocked(true);
+  await ensureIdentitySelected();
   elements.setupRequirements.textContent = buildSetupRequirements();
   renderMessages();
   updateQueueSize();
@@ -115,6 +125,7 @@ async function boot() {
     connectRealtime();
     flushQueues();
   }
+  setComposerLocked(false);
 }
 
 function bindUi() {
@@ -234,6 +245,82 @@ function applyConfigToForm() {
   elements.exportEndpoint.value = state.config.exportEndpoint;
   elements.exportEmail.value = state.config.exportEmail;
   applyConfigLockUi();
+  updateActiveUserUi();
+}
+
+function ensureIdentitySelected() {
+  return new Promise((resolve) => {
+    const previous = normalizeIdentity(state.identity || state.config.senderId || '');
+    if (previous) {
+      elements.identityCustom.value = previous;
+    }
+
+    elements.identityGate.hidden = false;
+
+    const choose = (rawName) => {
+      const name = normalizeIdentity(rawName);
+      if (!name) {
+        setComposerHint('Escribe un nombre valido para entrar al chat.');
+        return;
+      }
+
+      state.identity = name;
+      state.config.senderId = name;
+      saveJson(STORAGE_KEYS.identity, state.identity);
+      saveJson(STORAGE_KEYS.config, state.config);
+      elements.senderId.value = state.config.senderId;
+      elements.identityGate.hidden = true;
+      updateActiveUserUi();
+      setComposerHint(`Entraste como ${formatUserName(state.config.senderId)}.`);
+      resolve();
+    };
+
+    elements.identityRoberto.onclick = () => choose('roberto');
+    elements.identityMonica.onclick = () => choose('monica');
+    elements.identityCustomSubmit.onclick = () => choose(elements.identityCustom.value);
+    elements.identityCustom.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        choose(elements.identityCustom.value);
+      }
+    };
+  });
+}
+
+function normalizeIdentity(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function formatUserName(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return 'Desconocido';
+  }
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function updateActiveUserUi() {
+  elements.activeUser.textContent = formatUserName(state.config.senderId || state.identity);
+}
+
+function setComposerLocked(locked) {
+  const nodes = [elements.messageInput, elements.imageInput];
+  for (const node of nodes) {
+    node.disabled = locked;
+  }
+  const submitButton = document.getElementById('send-button');
+  if (submitButton) {
+    submitButton.disabled = locked;
+  }
+  const composer = document.querySelector('.composer');
+  if (composer) {
+    composer.classList.toggle('locked', locked);
+  }
 }
 
 function applyConfigLockUi() {
@@ -340,7 +427,7 @@ function renderMessages() {
     const body = fragment.querySelector('.message-body');
 
     const own = isOwnMessage(message);
-    sender.textContent = own ? 'Tu' : (message.sender || 'desconocido');
+    sender.textContent = own ? 'Tu' : formatUserName(message.sender || 'desconocido');
     time.textContent = formatDate(message.timestamp || new Date().toISOString());
     status.textContent = buildStatusLabel(message);
     root.classList.toggle('mine', own);
