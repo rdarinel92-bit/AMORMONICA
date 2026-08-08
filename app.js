@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v23';
+const APP_VERSION = '2026-08-08-v24';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -152,8 +152,6 @@ const elements = {
   netPanel: document.getElementById('net-panel'),
   syncNow: document.getElementById('sync-now'),
   hardRefresh: document.getElementById('hard-refresh'),
-  forceImages: document.getElementById('force-images'),
-  dataSaver: document.getElementById('data-saver'),
   haptics: document.getElementById('haptics'),
   installApp: document.getElementById('install-app'),
   shareChat: document.getElementById('share-chat'),
@@ -492,16 +490,6 @@ function bindUi() {
         console.error(error);
         setComposerHint('No se pudo forzar la actualización automática.');
       }
-    });
-  }
-
-  if (elements.forceImages) {
-    elements.forceImages.addEventListener('change', () => {
-      state.forceImages = elements.forceImages.checked;
-      saveJson(STORAGE_KEYS.forceImages, state.forceImages);
-      setComposerHint(state.forceImages
-        ? 'Forzar imagen activado. Se permitirán imágenes incluso con red difícil.'
-        : 'Forzar imagen desactivado. Se prioriza texto con red difícil.');
     });
   }
 
@@ -1061,9 +1049,6 @@ function applyConfigToForm() {
     elements.resetAdminSecret.value = state.config.resetAdminSecret || '';
   }
   elements.exportEmail.value = state.config.exportEmail;
-  if (elements.forceImages) {
-    elements.forceImages.checked = state.forceImages;
-  }
   if (elements.haptics) {
     elements.haptics.checked = state.haptics;
   }
