@@ -26,6 +26,7 @@ const PROBE_HISTORY = 8;
 const IMAGE_UPLOAD_MAX_RETRIES = 4;
 const IMAGE_UPLOAD_RETRY_BASE_MS = 1500;
 const IMAGE_DRAFT_PREVIEW_ENABLED = false;
+const RESET_FUNCTION_TIMEOUT_MS = 25000;
 const ENC_PREFIX = 'enc:v1:';
 const DAILY_UNLOCK_MS = 24 * 60 * 60 * 1000;
 const imageCache = new Map();
@@ -2343,6 +2344,19 @@ async function fetchMessagesRemote() {
   return response.json();
 }
 
+async function fetchMessagesForResetFallback() {
+  const filter = encodeURIComponent(`session_id=eq.${state.config.sessionId}`);
+  const url = `${state.config.supabaseUrl}/rest/v1/messages?select=type,content&${filter}`;
+  const response = await fetch(url, {
+    headers: supabaseHeaders()
+  });
+  if (!response.ok) {
+    const raw = await response.text();
+    throw new Error(`No se pudo consultar mensajes para reset REST: HTTP ${response.status} ${raw}`);
+  }
+  return response.json();
+}
+
 async function resetCurrentRoomForAll() {
   if (!isConfigured()) {
     setComposerHint('Configura Supabase antes de reiniciar la sala.');
@@ -2378,7 +2392,7 @@ async function resetCurrentRoomForAll() {
       mode = 'FUNCTION';
     } else {
       setComposerHint('Borrando historial e imágenes de la sala...');
-      const remoteMessages = await fetchMessagesRemote();
+      const remoteMessages = await fetchMessagesForResetFallback();
       for (const message of remoteMessages) {
         if (message && message.type === 'image' && message.content) {
           try {
@@ -2411,19 +2425,36 @@ async function resetCurrentRoomForAll() {
 
 async function resetRoomViaFunction(endpointName) {
   const url = `${state.config.supabaseUrl}/functions/v1/${endpointName}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: supabaseHeaders(),
-    body: JSON.stringify({
-      sender: state.config.senderId,
-      session_id: state.config.sessionId,
-      bucket_name: state.config.bucketName,
-      admin_secret: state.config.resetAdminSecret || undefined,
-      action: 'reset_room'
-    })
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), RESET_FUNCTION_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: supabaseHeaders(),
+      body: JSON.stringify({
+        sender: state.config.senderId,
+        session_id: state.config.sessionId,
+        bucket_name: state.config.bucketName,
+        admin_secret: state.config.resetAdminSecret || undefined,
+        action: 'reset_room'
+      }),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      throw new Error(`La función ${endpointName} tardó más de ${Math.round(RESET_FUNCTION_TIMEOUT_MS / 1000)}s.`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+
   if (!response.ok) {
     const raw = await response.text();
+    if (response.status === 404) {
+      throw new Error(`Función ${endpointName} no existe en Supabase (HTTP 404).`);
+    }
     throw new Error(`Función ${endpointName} devolvió HTTP ${response.status}: ${raw}`);
   }
 }
@@ -2458,6 +2489,15 @@ function formatSupabaseError(error) {
     return 'error desconocido.';
   }
   const text = String(error.message || error);
+  if (text.includes('invalid admin secret')) {
+    return 'clave admin inválida para reset. Verifica reset-admin-secret y RESET_ADMIN_SECRET.';
+  }
+  if (text.includes('HTTP 404')) {
+    return 'endpoint de reset no encontrado. Revisa reset-endpoint y despliegue de la función.';
+  }
+  if (text.includes('timed out') || text.includes('tardó más de')) {
+    return 'la función de reset excedió el tiempo de espera. Reintenta o revisa logs en Supabase.';
+  }
   if (text.length > 220) {
     return `${text.slice(0, 220)}...`;
   }
