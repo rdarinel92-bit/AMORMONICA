@@ -496,7 +496,7 @@ async function processUploadJob(job) {
     if (currentHash !== chunk.sha256) {
       throw new Error('Bloque corrupto antes de subir');
     }
-    await uploadFileToStorage(chunk.path, chunk.blob, `chunk-${chunk.index}.part`);
+    await uploadFileToStorage(chunk.path, chunk.blob);
     liveJob.uploadedIndices.push(chunk.index);
     liveJob.resumed = liveJob.uploadedIndices.length > 1;
     await dbPut(UPLOAD_STORE, liveJob);
@@ -522,7 +522,7 @@ async function processUploadJob(job) {
 
   const manifestPath = `manifests/${liveJob.sessionId}/${liveJob.id}.json`;
   const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-  await uploadFileToStorage(manifestPath, manifestBlob, `${liveJob.id}.json`);
+  await uploadFileToStorage(manifestPath, manifestBlob);
 
   const finalStatus = liveJob.resumed ? 'resumed' : 'sent';
   const manifestUrl = publicStorageUrl(manifestPath);
@@ -701,17 +701,16 @@ async function updateMessageRemote(localId, patch) {
   }
 }
 
-async function uploadFileToStorage(path, blob, fileName) {
-  const form = new FormData();
-  form.append('file', blob, fileName);
+async function uploadFileToStorage(path, blob) {
   const response = await fetch(`${state.config.supabaseUrl}/storage/v1/object/${state.config.bucketName}/${path}`, {
     method: 'POST',
     headers: {
       apikey: state.config.supabaseKey,
       Authorization: `Bearer ${state.config.supabaseKey}`,
-      'x-upsert': 'true'
+      'x-upsert': 'true',
+      'Content-Type': blob.type || 'application/octet-stream'
     },
-    body: form
+    body: blob
   });
   if (!response.ok) {
     throw new Error(await response.text());
