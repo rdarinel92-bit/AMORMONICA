@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v26';
+const APP_VERSION = '2026-08-08-v27';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -1157,6 +1157,15 @@ function formatUserName(value) {
 
 function updateActiveUserUi() {
   elements.activeUser.textContent = formatUserName(state.config.senderId || state.identity);
+  // Clear any previous avatar to prevent cross-contamination between users
+  elements.profileAvatarImg.removeAttribute('src');
+  elements.profileAvatarImg.style.opacity = '0';
+  if (elements.profileAvatarImgTopbar) {
+    elements.profileAvatarImgTopbar.removeAttribute('src');
+    elements.profileAvatarImgTopbar.style.opacity = '0';
+  }
+  // Now load the correct profile photo for the active user
+  loadProfilePhoto();
   updateProfileFallbackInitial();
   updateSyncSummary();
 }
@@ -1660,9 +1669,29 @@ async function saveProfilePhoto(file) {
 
 function loadProfilePhoto() {
   try {
+    const activeIdentity = normalizeIdentity(state.config.senderId || state.identity || '');
+    
+    // If no user is active, remove all avatars
+    if (!activeIdentity) {
+      elements.profileAvatarImg.removeAttribute('src');
+      elements.profileAvatarImg.style.opacity = '0';
+      if (elements.profileAvatarImgTopbar) {
+        elements.profileAvatarImgTopbar.removeAttribute('src');
+        elements.profileAvatarImgTopbar.style.opacity = '0';
+      }
+      syncProfileAvatarVisibility();
+      updateProfileFallbackInitial();
+      return;
+    }
+
     updateProfileFallbackInitial();
-    const photoDataUrl = localStorage.getItem(profilePhotoStorageKey());
+    
+    // Get the CORRECT key for this specific user
+    const correctKey = profilePhotoStorageKey();
+    const photoDataUrl = localStorage.getItem(correctKey);
+    
     if (photoDataUrl) {
+      // User has a profile photo
       elements.profileAvatarImg.src = photoDataUrl;
       elements.profileAvatarImg.style.opacity = '1';
       if (elements.profileAvatarImgTopbar) {
@@ -1670,14 +1699,17 @@ function loadProfilePhoto() {
         elements.profileAvatarImgTopbar.style.opacity = '1';
       }
     } else {
+      // User has no profile photo, show initials
       elements.profileAvatarImg.removeAttribute('src');
+      elements.profileAvatarImg.style.opacity = '0';
       if (elements.profileAvatarImgTopbar) {
         elements.profileAvatarImgTopbar.removeAttribute('src');
+        elements.profileAvatarImgTopbar.style.opacity = '0';
       }
     }
     syncProfileAvatarVisibility();
   } catch (error) {
-    console.error(error);
+    console.error('Error loading profile photo:', error);
   }
 }
 
