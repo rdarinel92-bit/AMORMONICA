@@ -132,6 +132,8 @@ button {
   width: 34px;
   height: 34px;
   border-width: 1px;
+  flex: 0 0 auto;
+  margin-left: 6px;
 }
 
 .topbar-avatar-fallback .profile-camera-icon {
@@ -156,10 +158,6 @@ button {
   border-radius: 50%;
   background: linear-gradient(180deg, #263146 0%, #1c2535 100%);
   border: 2px solid var(--line);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
   transition: all 0.2s ease;
   flex-shrink: 0;
@@ -172,10 +170,13 @@ button {
 }
 
 .profile-avatar img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+  z-index: 0;
 }
 
 .profile-avatar-fallback {
@@ -188,19 +189,19 @@ button {
   color: #d9e7ff;
   text-transform: uppercase;
   pointer-events: none;
+  z-index: 2;
 }
 
 .profile-camera-icon {
   position: absolute;
   font-size: 14px;
   opacity: 0;
-  transition: opacity 0.2s ease;
-  background: rgba(14, 17, 22, 0.85);
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 3;
 }
 
 .profile-avatar:hover .profile-camera-icon {
@@ -612,8 +613,8 @@ pre {
   }
 
   .topbar-avatar-fallback {
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
   }
 }
 
