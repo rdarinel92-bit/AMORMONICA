@@ -1031,8 +1031,12 @@ async function deleteOwnTextMessage(message) {
     persistQueuedTexts();
   }
 
+  let deleteSuccess = false;
   if (state.online && isConfigured()) {
-    await deleteMessageRemote(message.local_id).catch(async () => {
+    try {
+      await deleteMessageRemote(message.local_id);
+      deleteSuccess = true;
+    } catch (error) {
       await updateMessageRemote(message.local_id, {
         status: 'error',
         content: '',
@@ -1040,15 +1044,21 @@ async function deleteOwnTextMessage(message) {
         chunks_sent: 0
       }).catch(() => {
       });
-    });
+      setComposerHint('No se pudo eliminar el mensaje. Reintentar...');
+      return;
+    }
+  } else {
+    deleteSuccess = true;
   }
 
-  removeLocalMessage(message.local_id);
-  if (state.selectedMessageKey === message.local_id) {
-    state.selectedMessageKey = '';
+  if (deleteSuccess) {
+    removeLocalMessage(message.local_id);
+    if (state.selectedMessageKey === message.local_id) {
+      state.selectedMessageKey = '';
+    }
+    updateQueueSize();
+    setComposerHint('Mensaje eliminado del chat.');
   }
-  updateQueueSize();
-  setComposerHint('Mensaje eliminado del chat.');
 }
 
 function removeLocalMessage(localId) {
@@ -1085,8 +1095,12 @@ async function cancelOrRemoveOwnImage(message) {
     });
   }
 
+  let deleteSuccess = false;
   if (state.online && isConfigured()) {
-    await deleteMessageRemote(message.local_id).catch(async () => {
+    try {
+      await deleteMessageRemote(message.local_id);
+      deleteSuccess = true;
+    } catch (error) {
       await updateMessageRemote(message.local_id, {
         status: 'error',
         content: '',
@@ -1094,12 +1108,18 @@ async function cancelOrRemoveOwnImage(message) {
         chunks_sent: 0
       }).catch(() => {
       });
-    });
+      setComposerHint('No se pudo eliminar la imagen. Reintentar...');
+      return;
+    }
+  } else {
+    deleteSuccess = true;
   }
 
-  removeLocalMessage(message.local_id);
-  updateQueueSize();
-  setComposerHint(isPending ? 'Envio de imagen cancelado.' : 'Imagen eliminada del chat.');
+  if (deleteSuccess) {
+    removeLocalMessage(message.local_id);
+    updateQueueSize();
+    setComposerHint(isPending ? 'Envio de imagen cancelado.' : 'Imagen eliminada del chat.');
+  }
 }
 
 async function enqueueImageMessage(file) {
@@ -1494,11 +1514,18 @@ function removeMessageByRemoteRecord(record) {
 
 function pruneMissingSessionMessages(remoteLocalIds) {
   const before = state.messages.length;
+  const queuedIds = new Set(state.queuedTexts.map((item) => item.local_id));
   state.messages = state.messages.filter((message) => {
     if (message.session_id !== state.config.sessionId) {
       return true;
     }
     if (!message.local_id) {
+      return true;
+    }
+    if (queuedIds.has(message.local_id)) {
+      return true;
+    }
+    if (message.status === 'pending' && state.canceledUploadIds && !state.canceledUploadIds.has(message.local_id)) {
       return true;
     }
     return remoteLocalIds.has(message.local_id);
