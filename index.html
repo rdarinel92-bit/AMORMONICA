@@ -14,7 +14,7 @@
         <h1>Chat Privado Ligero</h1>
         <p class="subtitle">Una sola pagina, optimizada para conexiones lentas</p>
       </div>
-      <button id="toggle-setup" type="button" class="button ghost">Config</button>
+      <button id="toggle-setup" type="button" class="button ghost" hidden aria-hidden="true">Config</button>
     </header>
 
     <section class="status-grid" aria-label="Estado de conexion">
@@ -44,7 +44,7 @@
       </div>
     </section>
 
-    <section id="setup-panel" class="setup-panel" hidden>
+    <section id="setup-panel" class="setup-panel" hidden aria-hidden="true" style="display: none;">
       <h2>Configuracion Supabase</h2>
       <p class="setup-note">Usa la clave anon publica. No pongas service role en el navegador.</p>
       <p class="setup-note">La configuracion queda bloqueada por defecto para evitar cambios accidentales.</p>
