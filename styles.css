@@ -462,6 +462,7 @@ textarea:focus {
   background: linear-gradient(180deg, #121722 0%, #0f141f 100%);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+  contain: layout style;
 }
 
 .message {
@@ -470,6 +471,7 @@ textarea:focus {
   width: fit-content;
   border-radius: 12px;
   position: relative;
+  contain: layout style;
 }
 
 .message.mine {

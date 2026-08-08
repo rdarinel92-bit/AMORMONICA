@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v24';
+const APP_VERSION = '2026-08-08-v25';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -39,6 +39,7 @@ const imageCache = new Map();
 let deferredInstallPrompt = null;
 let serviceWorkerReloaded = false;
 let keyboardViewportRaf = 0;
+let renderRaf = 0;
 const COMMON_TYPO_FIXES = {
   adme: 'dame',
   corectas: 'correctas',
@@ -1006,7 +1007,6 @@ async function handleReconnect(options = {}) {
 
   await refreshHistory({ silent: true });
   await flushQueues();
-  await refreshHistory({ silent: true });
   updateSyncSummary();
 
   if (!soft) {
@@ -1691,7 +1691,7 @@ function selectMessage(message) {
     return;
   }
   state.selectedMessageKey = key;
-  renderMessages();
+  scheduleRender();
 }
 
 function clearSelectedMessage() {
@@ -1699,7 +1699,7 @@ function clearSelectedMessage() {
     return;
   }
   state.selectedMessageKey = '';
-  renderMessages();
+  scheduleRender();
 }
 
 function getSelectedMessage() {
@@ -1716,7 +1716,17 @@ function upsertMessage(message) {
   }
   state.messages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   persistMessages();
-  renderMessages();
+  scheduleRender();
+}
+
+function scheduleRender() {
+  if (renderRaf) {
+    return;
+  }
+  renderRaf = window.requestAnimationFrame(() => {
+    renderRaf = 0;
+    renderMessages();
+  });
 }
 
 function renderMessages() {
@@ -3629,13 +3639,22 @@ function startConnectionMonitoring() {
   if (state.resumeTimer) {
     window.clearInterval(state.resumeTimer);
   }
+  const intervalMs = document.hidden ? 45000 : 20000;
   state.resumeTimer = window.setInterval(async () => {
-    await probeConnection();
-    if (state.online) {
-      flushQueues();
-      refreshHistory({ silent: true });
+    if (state._monitorBusy) {
+      return;
     }
-  }, document.hidden || state.mode === 'Ultra-ligero' ? 30000 : 20000);
+    state._monitorBusy = true;
+    try {
+      await probeConnection();
+      if (state.online) {
+        flushQueues();
+        refreshHistory({ silent: true });
+      }
+    } finally {
+      state._monitorBusy = false;
+    }
+  }, intervalMs);
 }
 
 async function probeConnection() {
