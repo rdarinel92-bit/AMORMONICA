@@ -12,7 +12,7 @@
   <title>Chat Privado Ligero</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <main class="app">
@@ -51,8 +51,26 @@
         <h2>¿Quién eres?</h2>
         <p class="setup-note">Elige tu usuario antes de entrar al chat.</p>
         <div class="identity-actions">
-          <button id="identity-roberto" class="button" type="button">Soy Roberto</button>
-          <button id="identity-monica" class="button ghost" type="button">Soy Monica</button>
+          <button id="identity-roberto" class="identity-profile" type="button" aria-label="Entrar como Roberto">
+            <span class="identity-profile-avatar">
+              <img id="identity-roberto-avatar" src="" alt="">
+              <span id="identity-roberto-fallback" class="identity-profile-fallback">R</span>
+            </span>
+            <span class="identity-profile-name">Roberto</span>
+          </button>
+          <button id="identity-monica" class="identity-profile" type="button" aria-label="Entrar como Monica">
+            <span class="identity-profile-avatar">
+              <img id="identity-monica-avatar" src="" alt="">
+              <span id="identity-monica-fallback" class="identity-profile-fallback">M</span>
+            </span>
+            <span class="identity-profile-name">Monica</span>
+          </button>
+        </div>
+        <div id="identity-entry-progress" class="identity-entry-progress" hidden aria-live="polite">
+          <p id="identity-entry-message" class="identity-entry-message">Preparando sala...</p>
+          <div class="identity-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Progreso de ingreso">
+            <span id="identity-progress-fill" class="identity-progress-fill"></span>
+          </div>
         </div>
         <label>
           Otro nombre
@@ -246,6 +264,6 @@
     </article>
   </template>
 
-  <script src="app.js?v=32"></script>
+  <script src="app.js?v=33"></script>
 </body>
 </html>

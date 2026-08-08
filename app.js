@@ -16,7 +16,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v32';
+const APP_VERSION = '2026-08-08-v33';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -33,6 +33,12 @@ const VOICE_MAX_SECONDS = 120;
 const VOICE_MIN_BYTES = 400;
 const RESET_FUNCTION_TIMEOUT_MS = 25000;
 const HISTORY_PAGE_SIZE = 80;
+const IDENTITY_ENTRY_STEPS = [
+  { pct: 24, text: 'Conectando corazones...' },
+  { pct: 52, text: 'Preparando la sala para ustedes...' },
+  { pct: 78, text: 'Casi lista, mi amor...' },
+  { pct: 100, text: 'Bienvenida, disfruta cada segundo.' }
+];
 const ENC_PREFIX = 'enc:v1:';
 const DAILY_UNLOCK_MS = 24 * 60 * 60 * 1000;
 const imageCache = new Map();
@@ -168,6 +174,13 @@ const elements = {
   identityGate: document.getElementById('identity-gate'),
   identityRoberto: document.getElementById('identity-roberto'),
   identityMonica: document.getElementById('identity-monica'),
+  identityRobertoAvatar: document.getElementById('identity-roberto-avatar'),
+  identityRobertoFallback: document.getElementById('identity-roberto-fallback'),
+  identityMonicaAvatar: document.getElementById('identity-monica-avatar'),
+  identityMonicaFallback: document.getElementById('identity-monica-fallback'),
+  identityEntryProgress: document.getElementById('identity-entry-progress'),
+  identityEntryMessage: document.getElementById('identity-entry-message'),
+  identityProgressFill: document.getElementById('identity-progress-fill'),
   identityCustom: document.getElementById('identity-custom'),
   identityCustomSubmit: document.getElementById('identity-custom-submit'),
   toggleSetup: document.getElementById('toggle-setup'),
@@ -1095,6 +1108,7 @@ function ensureIdentitySelected() {
     elements.identityCustom.value = '';
 
     setIdentityGateVisible(true);
+    updateIdentityProfilesUi();
     if (state.identityByDevice[deviceId]) {
       elements.identityCustom.value = normalizeIdentity(state.identityByDevice[deviceId]);
     }
@@ -1106,6 +1120,10 @@ function ensureIdentitySelected() {
         return;
       }
 
+      if (state.identityEntryBusy) {
+        return;
+      }
+
       resetTransientChatState();
       state.identity = name;
       state.config.senderId = name;
@@ -1113,12 +1131,20 @@ function ensureIdentitySelected() {
       saveJson(STORAGE_KEYS.identity, state.identity);
       saveJson(STORAGE_KEYS.identityByDevice, state.identityByDevice);
       saveJson(STORAGE_KEYS.config, state.config);
-        loadActiveUserState();
+      loadActiveUserState();
       elements.senderId.value = state.config.senderId;
-      setIdentityGateVisible(false);
-      updateActiveUserUi();
-      setComposerHint(`Entraste como ${formatUserName(state.config.senderId)}.`);
-      resolve();
+
+      runIdentityEntryProgress(name)
+        .catch((error) => {
+          console.error('Identity progress failed', error);
+        })
+        .finally(() => {
+          setIdentityGateVisible(false);
+          updateActiveUserUi();
+          setComposerHint(`Entraste como ${formatUserName(state.config.senderId)}.`);
+          resetIdentityEntryProgressUi();
+          resolve();
+        });
     };
 
     elements.identityRoberto.onclick = () => choose('roberto');
@@ -1138,6 +1164,8 @@ function setIdentityGateVisible(visible) {
   elements.identityGate.style.display = visible ? 'grid' : 'none';
   document.body.classList.toggle('identity-lock', visible);
   if (visible) {
+    resetIdentityEntryProgressUi();
+    updateIdentityProfilesUi();
     window.requestAnimationFrame(() => {
       if (elements.identityMonica) {
         elements.identityMonica.focus();
@@ -1689,6 +1717,7 @@ async function saveProfilePhoto(file) {
       elements.profileAvatarImgTopbar.src = optimizedDataUrl;
     }
     syncProfileAvatarVisibility();
+    updateIdentityProfilesUi();
     setComposerHint('Foto de perfil actualizada.');
     window.setTimeout(() => URL.revokeObjectURL(instantPreviewUrl), 1000);
   } catch (error) {
@@ -1711,6 +1740,7 @@ function loadProfilePhoto() {
       }
       syncProfileAvatarVisibility();
       updateProfileFallbackInitial();
+      updateIdentityProfilesUi();
       return;
     }
 
@@ -1738,6 +1768,7 @@ function loadProfilePhoto() {
       }
     }
     syncProfileAvatarVisibility();
+    updateIdentityProfilesUi();
     
     // Load from Supabase in background (refreshes remote photos)
     loadProfilePhotoFromSupabase(activeIdentity).catch((error) => {
@@ -4687,7 +4718,91 @@ function clearProfilePhoto() {
     elements.profileAvatarImgTopbar.style.opacity = '0';
   }
   syncProfileAvatarVisibility();
+  updateIdentityProfilesUi();
   setComposerHint('Imagen de perfil eliminada.');
+}
+
+function resetIdentityEntryProgressUi() {
+  state.identityEntryBusy = false;
+  if (elements.identityEntryProgress) {
+    elements.identityEntryProgress.hidden = true;
+  }
+  if (elements.identityProgressFill) {
+    elements.identityProgressFill.style.width = '0%';
+  }
+  const track = document.querySelector('.identity-progress-track');
+  if (track) {
+    track.setAttribute('aria-valuenow', '0');
+  }
+  if (elements.identityEntryMessage) {
+    elements.identityEntryMessage.textContent = 'Preparando sala...';
+  }
+  setIdentityActionsDisabled(false);
+}
+
+function setIdentityActionsDisabled(disabled) {
+  const nodes = [elements.identityRoberto, elements.identityMonica, elements.identityCustom, elements.identityCustomSubmit];
+  for (const node of nodes) {
+    if (!node) {
+      continue;
+    }
+    node.disabled = disabled;
+  }
+}
+
+async function runIdentityEntryProgress(name) {
+  state.identityEntryBusy = true;
+  setIdentityActionsDisabled(true);
+  if (elements.identityEntryProgress) {
+    elements.identityEntryProgress.hidden = false;
+  }
+
+  const readableName = formatUserName(name);
+  for (const step of IDENTITY_ENTRY_STEPS) {
+    if (elements.identityProgressFill) {
+      elements.identityProgressFill.style.width = `${step.pct}%`;
+    }
+    const track = document.querySelector('.identity-progress-track');
+    if (track) {
+      track.setAttribute('aria-valuenow', String(step.pct));
+    }
+    if (elements.identityEntryMessage) {
+      const customText = step.text.includes('mi amor') ? `${step.text}` : `${step.text.replace('ustedes', readableName)}`;
+      elements.identityEntryMessage.textContent = customText;
+    }
+    await wait(step.pct >= 100 ? 260 : 220);
+  }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+  });
+}
+
+function profilePhotoStorageKeyForIdentity(identityValue) {
+  const identity = normalizeIdentity(identityValue || '');
+  return `${STORAGE_KEYS.profilePhoto}:${identity || 'anon'}`;
+}
+
+function updateIdentityProfilesUi() {
+  paintIdentityProfileChip('roberto', elements.identityRobertoAvatar, elements.identityRobertoFallback, 'R');
+  paintIdentityProfileChip('monica', elements.identityMonicaAvatar, elements.identityMonicaFallback, 'M');
+}
+
+function paintIdentityProfileChip(identity, avatarImage, fallbackNode, defaultInitial) {
+  if (!avatarImage || !fallbackNode) {
+    return;
+  }
+  const profileDataUrl = localStorage.getItem(profilePhotoStorageKeyForIdentity(identity));
+  if (profileDataUrl) {
+    avatarImage.src = profileDataUrl;
+    fallbackNode.style.opacity = '0';
+    return;
+  }
+  avatarImage.removeAttribute('src');
+  fallbackNode.textContent = defaultInitial;
+  fallbackNode.style.opacity = '1';
 }
 
 function ensureDeviceId() {
