@@ -276,7 +276,16 @@ function ensureIdentitySelected() {
   return new Promise((resolve) => {
     const previous = normalizeIdentity(state.identity || state.config.senderId || '');
     if (previous) {
+      state.identity = previous;
+      state.config.senderId = previous;
+      saveJson(STORAGE_KEYS.identity, state.identity);
+      saveJson(STORAGE_KEYS.config, state.config);
+      elements.senderId.value = state.config.senderId;
       elements.identityCustom.value = previous;
+      elements.identityGate.hidden = true;
+      updateActiveUserUi();
+      resolve();
+      return;
     }
 
     elements.identityGate.hidden = false;
