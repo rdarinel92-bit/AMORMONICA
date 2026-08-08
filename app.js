@@ -570,7 +570,7 @@ async function resolveImageSource(content) {
   const buffers = [];
   for (let index = 0; index < manifest.chunks.length; index += 1) {
     const partUrl = publicStorageUrl(manifest.chunks[index].path);
-    const response = await fetch(partUrl, { cache: 'force-cache' });
+    const response = await fetchStorageChunk(partUrl);
     if (!response.ok) {
       throw new Error('No se pudo leer un bloque de imagen');
     }
@@ -587,6 +587,20 @@ async function resolveImageSource(content) {
   imageCache.set(content, objectUrl);
   await dbPut(CACHE_STORE, { id: content, blob });
   return objectUrl;
+}
+
+async function fetchStorageChunk(partUrl) {
+  const publicResponse = await fetch(partUrl, { cache: 'force-cache' });
+  if (publicResponse.ok) {
+    return publicResponse;
+  }
+  return fetch(partUrl, {
+    cache: 'no-store',
+    headers: {
+      apikey: state.config.supabaseKey,
+      Authorization: `Bearer ${state.config.supabaseKey}`
+    }
+  });
 }
 
 function mergeArrayBuffers(buffers) {
