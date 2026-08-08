@@ -14,7 +14,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v14';
+const APP_VERSION = '2026-08-08-v15';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -2370,20 +2370,13 @@ async function resetCurrentRoomForAll() {
   setComposerLocked(true);
   try {
     const secureEndpoint = String(state.config.resetEndpoint || '').trim();
-    let usedSecureFunction = false;
+    let mode = 'REST';
 
     if (secureEndpoint) {
-      try {
-        setComposerHint(`Solicitando reinicio seguro vía función ${secureEndpoint}...`);
-        await resetRoomViaFunction(secureEndpoint);
-        usedSecureFunction = true;
-      } catch (secureError) {
-        console.error(secureError);
-        setComposerHint('La función segura falló. Intentando borrado directo por REST...');
-      }
-    }
-
-    if (!usedSecureFunction) {
+      setComposerHint(`Solicitando reinicio seguro vía función ${secureEndpoint}...`);
+      await resetRoomViaFunction(secureEndpoint);
+      mode = 'FUNCTION';
+    } else {
       setComposerHint('Borrando historial e imágenes de la sala...');
       const remoteMessages = await fetchMessagesRemote();
       for (const message of remoteMessages) {
@@ -2404,7 +2397,7 @@ async function resetCurrentRoomForAll() {
 
     await clearCurrentRoomLocalState();
     await refreshHistory({ silent: true });
-    setComposerHint(usedSecureFunction
+    setComposerHint(mode === 'FUNCTION'
       ? 'Sala reiniciada para todos (modo seguro por función).'
       : 'Sala reiniciada para todos (modo directo REST).');
   } catch (error) {
