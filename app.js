@@ -1617,7 +1617,7 @@ function updateInstallStatusUi() {
     elements.identityInstallStatus.textContent = standalone
       ? `Ya está instalada en el teléfono. ${installMessage}`
       : android
-        ? `En Android este botón descarga la APK directa para instalarla en el teléfono. ${installMessage}`
+        ? 'Estado: listo para descargar APK.'
         : `Instalar crea un acceso directo y abre la app como PWA. ${installMessage}`;
   }
 
