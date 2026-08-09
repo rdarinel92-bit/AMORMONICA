@@ -22,7 +22,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v50';
+const APP_VERSION = '2026-08-08-v51';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -40,7 +40,8 @@ const VOICE_MIN_BYTES = 400;
 const VOICE_BITRATE_KBPS_LOW = 16;
 const VOICE_BITRATE_KBPS_MEDIUM = 24;
 const VOICE_BITRATE_KBPS_HIGH = 32;
-const APK_DOWNLOAD_URL = 'https://github.com/rdarinel92-bit/AMORMONICA/raw/main/releases/chat-privado-ligero-debug.apk';
+const APK_DOWNLOAD_URL = 'https://raw.githubusercontent.com/rdarinel92-bit/AMORMONICA/main/releases/chat-privado-ligero-debug.apk';
+const APK_DOWNLOAD_URL_ALT = 'https://github.com/rdarinel92-bit/AMORMONICA/raw/main/releases/chat-privado-ligero-debug.apk';
 const BOOT_PROBE_TIMEOUT_MS = 8000;
 const BOOT_HISTORY_TIMEOUT_MS = 12000;
 const HISTORY_FETCH_TIMEOUT_MS = 10000;
@@ -57,6 +58,7 @@ const ENC_PREFIX = 'enc:v1:';
 const DAILY_UNLOCK_MS = 24 * 60 * 60 * 1000;
 const imageCache = new Map();
 let deferredInstallPrompt = null;
+let apkDownloadAttempt = 0;
 let serviceWorkerReloaded = false;
 let keyboardViewportRaf = 0;
 let renderRaf = 0;
@@ -1697,15 +1699,20 @@ function isAndroidDevice() {
 }
 
 function startApkDownload() {
+  apkDownloadAttempt += 1;
+  const useAlternate = apkDownloadAttempt % 2 === 0;
+  const url = useAlternate ? APK_DOWNLOAD_URL_ALT : APK_DOWNLOAD_URL;
+
   try {
-    window.location.assign(APK_DOWNLOAD_URL);
-  } catch (_error) {
     const anchor = document.createElement('a');
-    anchor.href = APK_DOWNLOAD_URL;
-    anchor.rel = 'noopener';
+    anchor.href = url;
+    anchor.target = '_blank';
+    anchor.rel = 'noopener noreferrer';
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
+  } catch (_error) {
+    window.open(url, '_blank', 'noopener');
   }
 }
 
@@ -1718,7 +1725,7 @@ async function requestPhoneInstall() {
 
   if (isAndroidDevice()) {
     startApkDownload();
-    setComposerHint('Descargando APK... Si Android lo pide, autoriza la descarga e instalación.');
+    setComposerHint('Descargando APK... Si se queda en "Descargando", toca el botón otra vez para usar enlace alterno.');
     return true;
   }
 
