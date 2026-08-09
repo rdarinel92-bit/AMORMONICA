@@ -22,7 +22,7 @@ const STORAGE_KEYS = {
   appVersion: 'chat-lite-app-version',
   emojiRecent: 'chat-lite-emoji-recent'
 };
-const APP_VERSION = '2026-08-08-v51';
+const APP_VERSION = '2026-08-08-v52';
 
 const DB_NAME = 'chat-lite-db';
 const DB_VERSION = 1;
@@ -42,6 +42,7 @@ const VOICE_BITRATE_KBPS_MEDIUM = 24;
 const VOICE_BITRATE_KBPS_HIGH = 32;
 const APK_DOWNLOAD_URL = 'https://raw.githubusercontent.com/rdarinel92-bit/AMORMONICA/main/releases/chat-privado-ligero-debug.apk';
 const APK_DOWNLOAD_URL_ALT = 'https://github.com/rdarinel92-bit/AMORMONICA/raw/main/releases/chat-privado-ligero-debug.apk';
+const BACKGROUND_SYNC_HIDDEN_MS = 45000;
 const BOOT_PROBE_TIMEOUT_MS = 8000;
 const BOOT_HISTORY_TIMEOUT_MS = 12000;
 const HISTORY_FETCH_TIMEOUT_MS = 10000;
@@ -62,6 +63,7 @@ let apkDownloadAttempt = 0;
 let serviceWorkerReloaded = false;
 let keyboardViewportRaf = 0;
 let renderRaf = 0;
+let backgroundSyncTimer = 0;
 const COMMON_TYPO_FIXES = {
   adme: 'dame',
   corectas: 'correctas',
@@ -306,6 +308,7 @@ boot().catch((error) => {
 
 async function boot() {
   bindUi();
+  installGlobalErrorGuards();
   setupKeyboardViewportHandling();
   await enforceAppVersion();
   ensureDeviceId();
@@ -772,9 +775,11 @@ function bindUi() {
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      startBackgroundSyncTicker();
       stopVoiceRecording().catch(() => {
       });
     } else {
+      stopBackgroundSyncTicker();
       clearUnreadBadge();
       syncVisibleMessageReceipts().catch((error) => {
         console.error(error);
@@ -1265,6 +1270,9 @@ function bindUi() {
 
   window.addEventListener('online', () => {
     state.online = true;
+    if (document.hidden) {
+      startBackgroundSyncTicker();
+    }
     handleReconnect().catch((error) => {
       console.error(error);
       setComposerHint('Reconectado con incidencias. Reintentando sincronización.');
@@ -1273,6 +1281,7 @@ function bindUi() {
 
   window.addEventListener('offline', () => {
     state.online = false;
+    stopBackgroundSyncTicker();
     updateConnectionUi();
   });
 
@@ -6073,4 +6082,46 @@ function finalizeIdentityEntry() {
   updateActiveUserUi();
   setComposerHint(`Entraste como ${formatUserName(state.config.senderId)}.`);
   resetIdentityEntryProgressUi();
+}
+
+function installGlobalErrorGuards() {
+  window.addEventListener('error', (event) => {
+    const message = event && event.message ? String(event.message) : 'Error inesperado';
+    console.error('Global error:', event);
+    if (document.hidden) {
+      return;
+    }
+    setComposerHint(`Se detectó un problema: ${message.slice(0, 80)}. La app intentará seguir funcionando.`);
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    console.error('Unhandled promise rejection:', event && event.reason ? event.reason : event);
+    if (document.hidden) {
+      return;
+    }
+    setComposerHint('Se detectó una falla de red o sincronización. Reintentando en segundo plano.');
+  });
+}
+
+function startBackgroundSyncTicker() {
+  if (backgroundSyncTimer || !document.hidden) {
+    return;
+  }
+
+  backgroundSyncTimer = window.setInterval(() => {
+    if (!document.hidden || !state.online || !isConfigured()) {
+      return;
+    }
+    handleReconnect({ soft: true }).catch((error) => {
+      console.error('Background sync error:', error);
+    });
+  }, BACKGROUND_SYNC_HIDDEN_MS);
+}
+
+function stopBackgroundSyncTicker() {
+  if (!backgroundSyncTimer) {
+    return;
+  }
+  window.clearInterval(backgroundSyncTimer);
+  backgroundSyncTimer = 0;
 }
