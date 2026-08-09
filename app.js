@@ -704,7 +704,7 @@ function bindUi() {
 
   if (elements.installApp) {
     elements.installApp.addEventListener('click', () => {
-      requestAppInstall().catch((error) => {
+      requestPhoneInstall().catch((error) => {
         console.error(error);
         setComposerHint('No se pudo iniciar la instalación.');
       });
@@ -1617,8 +1617,13 @@ function updateInstallStatusUi() {
     elements.identityInstallStatus.textContent = standalone
       ? `Ya está instalada en el teléfono. ${installMessage}`
       : android
-        ? `En Android este botón descarga la APK para instalarla directo en el teléfono. ${installMessage}`
+        ? `En Android este botón descarga la APK directa para instalarla en el teléfono. ${installMessage}`
         : `Instalar crea un acceso directo y abre la app como PWA. ${installMessage}`;
+  }
+
+  if (elements.installApp && android) {
+    elements.installApp.hidden = false;
+    elements.installApp.setAttribute('aria-hidden', 'false');
   }
 
   if (elements.identityOpenApp) {
@@ -1629,6 +1634,12 @@ function updateInstallStatusUi() {
   const buttons = [elements.installApp, elements.identityInstallApp];
   for (const button of buttons) {
     if (!button) {
+      continue;
+    }
+    if (android && !standalone) {
+      button.textContent = 'Descargar APK';
+      button.disabled = false;
+      button.removeAttribute('aria-disabled');
       continue;
     }
     if (standalone) {
@@ -1686,13 +1697,16 @@ function isAndroidDevice() {
 }
 
 function startApkDownload() {
-  const anchor = document.createElement('a');
-  anchor.href = APK_DOWNLOAD_URL;
-  anchor.download = 'chat-privado-ligero-debug.apk';
-  anchor.rel = 'noopener';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
+  try {
+    window.location.assign(APK_DOWNLOAD_URL);
+  } catch (_error) {
+    const anchor = document.createElement('a');
+    anchor.href = APK_DOWNLOAD_URL;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
 }
 
 async function requestPhoneInstall() {
