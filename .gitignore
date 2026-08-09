@@ -6,4 +6,6 @@ android/local.properties
 android/captures/
 *.apk
 *.aab
+gradle-build.log
+gradle-exit.txt
 *.iml
