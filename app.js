@@ -40,6 +40,7 @@ const VOICE_MIN_BYTES = 400;
 const VOICE_BITRATE_KBPS_LOW = 16;
 const VOICE_BITRATE_KBPS_MEDIUM = 24;
 const VOICE_BITRATE_KBPS_HIGH = 32;
+const APK_DOWNLOAD_URL = 'https://github.com/rdarinel92-bit/AMORMONICA/raw/main/releases/chat-privado-ligero-debug.apk';
 const BOOT_PROBE_TIMEOUT_MS = 8000;
 const BOOT_HISTORY_TIMEOUT_MS = 12000;
 const HISTORY_FETCH_TIMEOUT_MS = 10000;
@@ -712,7 +713,7 @@ function bindUi() {
 
   if (elements.identityInstallApp) {
     elements.identityInstallApp.addEventListener('click', () => {
-      requestAppInstall().catch((error) => {
+      requestPhoneInstall().catch((error) => {
         console.error(error);
         setComposerHint('No se pudo iniciar la instalación.');
       });
@@ -1599,6 +1600,7 @@ function formatInstallAuditDate(value) {
 
 function updateInstallStatusUi() {
   const standalone = isRunningStandalone();
+  const android = isAndroidDevice();
   const promptReady = Boolean(deferredInstallPrompt || (state.installAudit && state.installAudit.promptAvailable));
   const lastChoice = String((state.installAudit && state.installAudit.lastChoice) || 'sin intentos');
   const lastChoiceAt = formatInstallAuditDate(state.installAudit && state.installAudit.lastChoiceAt);
@@ -1614,7 +1616,9 @@ function updateInstallStatusUi() {
   if (elements.identityInstallStatus) {
     elements.identityInstallStatus.textContent = standalone
       ? `Ya está instalada en el teléfono. ${installMessage}`
-      : `Instalar crea un acceso directo y abre la app como PWA. ${installMessage}`;
+      : android
+        ? `En Android este botón descarga la APK para instalarla directo en el teléfono. ${installMessage}`
+        : `Instalar crea un acceso directo y abre la app como PWA. ${installMessage}`;
   }
 
   if (elements.identityOpenApp) {
@@ -1674,6 +1678,37 @@ async function requestAppInstall() {
     ? 'Instalación iniciada.'
     : 'Instalación cancelada.');
   return choice.outcome === 'accepted';
+}
+
+function isAndroidDevice() {
+  const ua = String(navigator.userAgent || navigator.vendor || '').toLowerCase();
+  return /android/.test(ua);
+}
+
+function startApkDownload() {
+  const anchor = document.createElement('a');
+  anchor.href = APK_DOWNLOAD_URL;
+  anchor.download = 'chat-privado-ligero-debug.apk';
+  anchor.rel = 'noopener';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+async function requestPhoneInstall() {
+  if (isRunningStandalone()) {
+    setComposerHint('La app ya está instalada en este teléfono.');
+    updateInstallStatusUi();
+    return true;
+  }
+
+  if (isAndroidDevice()) {
+    startApkDownload();
+    setComposerHint('Descargando APK... Si Android lo pide, autoriza la descarga e instalación.');
+    return true;
+  }
+
+  return requestAppInstall();
 }
 
 function openProfileSettingsPanel() {
