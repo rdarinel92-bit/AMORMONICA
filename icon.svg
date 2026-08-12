@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Chat Privado Ligero">
-  <rect width="512" height="512" rx="112" fill="#111111"/>
-  <path d="M136 154h240c18.8 0 34 15.2 34 34v116c0 18.8-15.2 34-34 34H234l-70 56v-56h-28c-18.8 0-34-15.2-34-34V188c0-18.8 15.2-34 34-34Z" fill="#ffffff"/>
-  <circle cx="202" cy="246" r="18" fill="#111111"/>
-  <circle cx="256" cy="246" r="18" fill="#111111"/>
-  <circle cx="310" cy="246" r="18" fill="#111111"/>
-</svg>

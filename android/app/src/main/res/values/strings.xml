@@ -4,4 +4,6 @@
     <string name="title_activity_main">Chat Privado Ligero</string>
     <string name="package_name">com.rober.chatprivadoligero</string>
     <string name="custom_url_scheme">com.rober.chatprivadoligero</string>
+    <string name="notification_channel_name">Mensajes</string>
+    <string name="notification_channel_description">Avisos de nuevos mensajes</string>
 </resources>
